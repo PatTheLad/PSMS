@@ -85,17 +85,21 @@ $icoSrc = Join-Path $repoRoot 'src/PSMS.App/wwwroot/favicon.ico'
 if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $publishDir 'appicon.png') -Force }
 if (Test-Path $icoSrc) { Copy-Item $icoSrc (Join-Path $publishDir 'favicon.ico') -Force }
 
-Write-Host "Restoring app assets for win-x64 (WiX publish)..." -ForegroundColor Cyan
-dotnet restore $appProj -r win-x64
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet restore failed with exit code $LASTEXITCODE"
+$publishFileCount = @(Get-ChildItem -Path $publishDir -File -Recurse -ErrorAction SilentlyContinue).Count
+if ($publishFileCount -lt 1) {
+    throw "Publish folder is empty: $publishDir"
 }
 
+# Heat needs the folder to exist before the WiX build starts (forward-slash absolute path)
+$publishFolderMsbuild = ((Resolve-Path $publishDir).Path.TrimEnd('\', '/') -replace '\\', '/') + '/'
+
 Write-Host "Building MSI + Setup bootstrapper (WiX, $Configuration, version $Version)..." -ForegroundColor Cyan
+Write-Host "  Harvesting: $publishFolderMsbuild" -ForegroundColor DarkGray
 dotnet build $bundleProj `
     -c $Configuration `
     -p:Version=$Version `
-    -p:ProductVersion=$Version
+    -p:ProductVersion=$Version `
+    -p:PublishFolder=$publishFolderMsbuild
 
 if ($LASTEXITCODE -ne 0) {
     throw "WiX bundle build failed with exit code $LASTEXITCODE"
