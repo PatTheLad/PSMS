@@ -36,5 +36,6 @@ public interface IDbProvider
         string database,
         string sql,
         int maxRows = 10_000,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool includeActualPlan = false);
 }

@@ -271,18 +271,26 @@ public sealed class SqlServerProvider : IDbProvider
         string database,
         string sql,
         int maxRows = 10_000,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeActualPlan = false)
     {
         var sw = Stopwatch.StartNew();
         var messages = new List<string>();
         var resultSets = new List<ResultSet>();
         var rowsAffected = 0;
+        string? planXml = null;
 
         try
         {
             await using var sqlConnection = CreateConnection(connection, password, database);
             sqlConnection.InfoMessage += (_, e) => messages.Add(e.Message);
             await sqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            if (includeActualPlan)
+            {
+                await using var on = new SqlCommand("SET STATISTICS XML ON;", sqlConnection);
+                await on.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             await using var command = new SqlCommand(sql, sqlConnection)
             {
@@ -295,6 +303,19 @@ public sealed class SqlServerProvider : IDbProvider
             {
                 if (reader.FieldCount <= 0)
                 {
+                    continue;
+                }
+
+                // STATISTICS XML returns a single-column result named like Microsoft SQL Server ... Showplan
+                if (includeActualPlan
+                    && reader.FieldCount == 1
+                    && reader.GetName(0).Contains("Showplan", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false) && !reader.IsDBNull(0))
+                    {
+                        planXml = reader.GetValue(0)?.ToString();
+                    }
+
                     continue;
                 }
 
@@ -342,6 +363,21 @@ public sealed class SqlServerProvider : IDbProvider
             while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
 
             rowsAffected = reader.RecordsAffected;
+            await reader.DisposeAsync().ConfigureAwait(false);
+
+            if (includeActualPlan)
+            {
+                try
+                {
+                    await using var off = new SqlCommand("SET STATISTICS XML OFF;", sqlConnection);
+                    await off.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
             sw.Stop();
 
             if (resultSets.Count > 0)
@@ -354,12 +390,21 @@ public sealed class SqlServerProvider : IDbProvider
                 messages.Insert(0, $"Completed in {sw.ElapsedMilliseconds} ms. {rowsAffected} row(s) affected.");
             }
 
+            if (includeActualPlan)
+            {
+                messages.Add(string.IsNullOrWhiteSpace(planXml)
+                    ? "Actual plan requested but no Showplan XML was returned."
+                    : "Actual execution plan captured.");
+            }
+
             return new QueryResult
             {
                 ResultSets = resultSets,
                 Messages = messages,
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
-                RowsAffected = rowsAffected
+                RowsAffected = rowsAffected,
+                ExecutionPlanXml = planXml,
+                PlanNodes = ExecutionPlanParser.Summarize(planXml)
             };
         }
         catch (OperationCanceledException)
@@ -370,7 +415,9 @@ public sealed class SqlServerProvider : IDbProvider
                 ResultSets = resultSets,
                 Messages = messages.Concat(["Query cancelled."]).ToList(),
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
-                Error = "Cancelled"
+                Error = "Cancelled",
+                ExecutionPlanXml = planXml,
+                PlanNodes = ExecutionPlanParser.Summarize(planXml)
             };
         }
         catch (Exception ex)
@@ -381,7 +428,9 @@ public sealed class SqlServerProvider : IDbProvider
                 ResultSets = resultSets,
                 Messages = messages.Concat([ex.Message]).ToList(),
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
-                Error = ex.Message
+                Error = ex.Message,
+                ExecutionPlanXml = planXml,
+                PlanNodes = ExecutionPlanParser.Summarize(planXml)
             };
         }
     }

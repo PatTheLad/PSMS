@@ -16,6 +16,11 @@
         <div class="psms-tab-tools">
             <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download"
                        Disabled="@(!result.HasResultSet)" OnClick="ExportCsvAsync">Export CSV</MudButton>
+            @if (result.HasExecutionPlan)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy"
+                           OnClick="CopyPlanAsync">Copy plan XML</MudButton>
+            }
             <MudSpacer />
             <MudText Typo="Typo.caption">@result.ElapsedMilliseconds ms</MudText>
         </div>
@@ -67,6 +72,44 @@
                 </MudTabPanel>
             }
 
+            @if (result.HasExecutionPlan)
+            {
+                <MudTabPanel Text="@($"Plan ({result.PlanNodes.Count})")">
+                    <div class="psms-plan-pane">
+                        @if (result.PlanNodes.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Class="pa-2 mud-text-secondary">Plan XML captured but no operators parsed.</MudText>
+                        }
+                        else
+                        {
+                            <MudTable Items="result.PlanNodes" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+                                <HeaderContent>
+                                    <MudTh>#</MudTh>
+                                    <MudTh>Physical</MudTh>
+                                    <MudTh>Logical</MudTh>
+                                    <MudTh>Est. rows</MudTh>
+                                    <MudTh>Est. cost</MudTh>
+                                    <MudTh>Object</MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd>@context.NodeId</MudTd>
+                                    <MudTd Style="font-weight:600">@context.PhysicalOp</MudTd>
+                                    <MudTd>@context.LogicalOp</MudTd>
+                                    <MudTd>@context.EstimatedRows.ToString("N1")</MudTd>
+                                    <MudTd>@context.EstimatedCost.ToString("N4")</MudTd>
+                                    <MudTd Style="font-family:var(--psms-mono);font-size:12px">@(context.ObjectName ?? "—")</MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                        <MudExpansionPanels Class="mt-2">
+                            <MudExpansionPanel Text="Raw Showplan XML">
+                                <pre class="psms-code-block" style="max-height:280px">@result.ExecutionPlanXml</pre>
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+                    </div>
+                </MudTabPanel>
+            }
+
             <MudTabPanel Text="Messages">
                 <div class="psms-messages">
                     @foreach (var message in result.Messages)
@@ -84,6 +127,8 @@
 </div>
 
 @code {
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+
     protected override void OnInitialized() => Sessions.Changed += OnChanged;
     private void OnChanged() => InvokeAsync(StateHasChanged);
     public void Dispose() => Sessions.Changed -= OnChanged;
@@ -98,6 +143,25 @@
             _ => cell.ToString() ?? string.Empty
         };
 
+    private async Task CopyPlanAsync()
+    {
+        var xml = Sessions.ActiveTab?.LastResult?.ExecutionPlanXml;
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return;
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", xml);
+            Snackbar.Add("Plan XML copied.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Could not copy to clipboard.", Severity.Warning);
+        }
+    }
+
     private async Task ExportCsvAsync()
     {
         var result = Sessions.ActiveTab?.LastResult;
@@ -106,7 +170,6 @@
             return;
         }
 
-        // Export the first result set (primary grid).
         var set = result.ResultSets[0];
         var path = await FileDialogs.SaveCsvFileAsync("results.csv");
         if (string.IsNullOrWhiteSpace(path))

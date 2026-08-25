@@ -738,6 +738,249 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
         }
     }
 
+    public async Task<AdminOperationResult> CreateAgentJobAsync(
+        ConnectionDefinition connection,
+        string? password,
+        CreateAgentJobRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var messages = new List<string>();
+        if (string.IsNullOrWhiteSpace(request.JobName) || string.IsNullOrWhiteSpace(request.Command))
+        {
+            return AdminOperationResult.Fail("Job name and T-SQL command are required.");
+        }
+
+        try
+        {
+            await using var conn = SqlServerConnectionFactory.Create(connection, password, "msdb");
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            conn.InfoMessage += (_, e) => messages.Add(e.Message);
+
+            await using (var addJob = new SqlCommand("msdb.dbo.sp_add_job", conn) { CommandType = System.Data.CommandType.StoredProcedure })
+            {
+                addJob.Parameters.AddWithValue("@job_name", request.JobName);
+                addJob.Parameters.AddWithValue("@enabled", request.Enabled ? 1 : 0);
+                addJob.Parameters.AddWithValue("@description", request.Description ?? string.Empty);
+                await addJob.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var addStep = new SqlCommand("msdb.dbo.sp_add_jobstep", conn) { CommandType = System.Data.CommandType.StoredProcedure })
+            {
+                addStep.Parameters.AddWithValue("@job_name", request.JobName);
+                addStep.Parameters.AddWithValue("@step_name", string.IsNullOrWhiteSpace(request.StepName) ? "Step 1" : request.StepName);
+                addStep.Parameters.AddWithValue("@subsystem", "TSQL");
+                addStep.Parameters.AddWithValue("@command", request.Command);
+                addStep.Parameters.AddWithValue("@database_name", string.IsNullOrWhiteSpace(request.DatabaseName) ? "master" : request.DatabaseName);
+                await addStep.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var addServer = new SqlCommand("msdb.dbo.sp_add_jobserver", conn) { CommandType = System.Data.CommandType.StoredProcedure })
+            {
+                addServer.Parameters.AddWithValue("@job_name", request.JobName);
+                await addServer.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (request.StartImmediately)
+            {
+                await using var start = new SqlCommand("msdb.dbo.sp_start_job", conn) { CommandType = System.Data.CommandType.StoredProcedure };
+                start.Parameters.AddWithValue("@job_name", request.JobName);
+                await start.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                messages.Add($"Job '{request.JobName}' started.");
+            }
+
+            sw.Stop();
+            messages.Insert(0, $"Created Agent job '{request.JobName}'.");
+            return AdminOperationResult.Ok($"Created job '{request.JobName}'.", sw.ElapsedMilliseconds, messages);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            messages.Add(ex.Message);
+            return AdminOperationResult.Fail(ex.Message, sw.ElapsedMilliseconds, messages);
+        }
+    }
+
+    public async Task<AdminOperationResult> DropDatabaseAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        bool force = true,
+        CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        if (string.IsNullOrWhiteSpace(database) || !IsSafeIdentifier(database))
+        {
+            return AdminOperationResult.Fail("Invalid database name.");
+        }
+
+        if (SystemDatabases.Contains(database))
+        {
+            return AdminOperationResult.Fail($"Refusing to drop system database '{database}'.");
+        }
+
+        try
+        {
+            SqlConnection.ClearAllPools();
+            await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            if (force)
+            {
+                await using var kick = new SqlCommand(
+                    $"ALTER DATABASE {QuoteIdent(database)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;", conn)
+                {
+                    CommandTimeout = 60
+                };
+                await kick.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using var drop = new SqlCommand($"DROP DATABASE {QuoteIdent(database)};", conn) { CommandTimeout = 120 };
+            await drop.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            sw.Stop();
+            return AdminOperationResult.Ok($"Dropped database {database}.", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return AdminOperationResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
+    public async Task<AdminOperationResult> SetRecoveryModelAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string recoveryModel,
+        CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        if (string.IsNullOrWhiteSpace(database) || !IsSafeIdentifier(database))
+        {
+            return AdminOperationResult.Fail("Invalid database name.");
+        }
+
+        var recovery = (recoveryModel ?? "SIMPLE").ToUpperInvariant() switch
+        {
+            "FULL" => "FULL",
+            "BULK_LOGGED" => "BULK_LOGGED",
+            _ => "SIMPLE"
+        };
+
+        try
+        {
+            await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var cmd = new SqlCommand($"ALTER DATABASE {QuoteIdent(database)} SET RECOVERY {recovery};", conn);
+            await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            sw.Stop();
+            return AdminOperationResult.Ok($"[{database}] recovery set to {recovery}.", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return AdminOperationResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
+    public async Task<AdminOperationResult> KillSessionAsync(
+        ConnectionDefinition connection,
+        string? password,
+        int sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        if (sessionId <= 0)
+        {
+            return AdminOperationResult.Fail("Invalid session id.");
+        }
+
+        try
+        {
+            await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var cmd = new SqlCommand($"KILL {sessionId};", conn);
+            await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            sw.Stop();
+            return AdminOperationResult.Ok($"Killed session {sessionId}.", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return AdminOperationResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
+    public async Task<IReadOnlyList<MissingIndexInfo>> GetMissingIndexesAsync(
+        ConnectionDefinition connection,
+        string? password,
+        int top = 25,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TOP (@top)
+                DB_NAME(mid.database_id) AS db_name,
+                OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id) AS schema_name,
+                OBJECT_NAME(mid.object_id, mid.database_id) AS table_name,
+                migs.avg_user_impact * (migs.user_seeks + migs.user_scans) AS impact_score,
+                migs.user_seeks,
+                migs.user_scans,
+                ISNULL(mid.equality_columns, N''),
+                ISNULL(mid.inequality_columns, N''),
+                ISNULL(mid.included_columns, N''),
+                N'CREATE INDEX IX_' + OBJECT_NAME(mid.object_id, mid.database_id) + N'_missing ON '
+                    + QUOTENAME(DB_NAME(mid.database_id)) + N'.'
+                    + QUOTENAME(OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id)) + N'.'
+                    + QUOTENAME(OBJECT_NAME(mid.object_id, mid.database_id))
+                    + N' (' + ISNULL(mid.equality_columns, N'')
+                    + CASE WHEN mid.equality_columns IS NOT NULL AND mid.inequality_columns IS NOT NULL THEN N', ' ELSE N'' END
+                    + ISNULL(mid.inequality_columns, N'') + N')'
+                    + CASE WHEN mid.included_columns IS NOT NULL THEN N' INCLUDE (' + mid.included_columns + N')' ELSE N'' END
+                    + N';' AS create_stmt
+            FROM sys.dm_db_missing_index_groups mig
+            INNER JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
+            INNER JOIN sys.dm_db_missing_index_details mid ON mid.index_handle = mig.index_handle
+            WHERE mid.database_id > 4
+            ORDER BY impact_score DESC;
+            """;
+
+        try
+        {
+            await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@top", Math.Clamp(top, 1, 100));
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var list = new List<MissingIndexInfo>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (reader.IsDBNull(0) || reader.IsDBNull(2))
+                {
+                    continue;
+                }
+
+                list.Add(new MissingIndexInfo
+                {
+                    Database = reader.GetString(0),
+                    Schema = reader.IsDBNull(1) ? "dbo" : reader.GetString(1),
+                    Table = reader.GetString(2),
+                    ImpactScore = Convert.ToDouble(reader.GetValue(3)),
+                    UserSeeks = Convert.ToInt64(reader.GetValue(4)),
+                    UserScans = Convert.ToInt64(reader.GetValue(5)),
+                    EqualityColumns = reader.GetString(6),
+                    InequalityColumns = reader.GetString(7),
+                    IncludedColumns = reader.GetString(8),
+                    CreateIndexStatement = reader.GetString(9)
+                });
+            }
+
+            return list;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     public async Task<ServerAnalysisSnapshot> GetServerAnalysisAsync(
         ConnectionDefinition connection,
         string? password,
@@ -745,6 +988,7 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
     {
         var databases = await GetDatabaseAdminInfoAsync(connection, password, cancellationToken).ConfigureAwait(false);
         var agent = await GetAgentStatusAsync(connection, password, cancellationToken).ConfigureAwait(false);
+        var missing = await GetMissingIndexesAsync(connection, password, 25, cancellationToken).ConfigureAwait(false);
 
         await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -801,7 +1045,8 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
             Agent = agent,
             Databases = databases,
             TopSessions = sessions,
-            TopWaits = waits
+            TopWaits = waits,
+            MissingIndexes = missing
         };
     }
 

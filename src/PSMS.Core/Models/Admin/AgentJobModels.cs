@@ -61,6 +61,7 @@ public sealed class ServerAnalysisSnapshot
     public IReadOnlyList<DatabaseAdminInfo> Databases { get; init; } = [];
     public IReadOnlyList<SessionActivityInfo> TopSessions { get; init; } = [];
     public IReadOnlyList<WaitStatInfo> TopWaits { get; init; } = [];
+    public IReadOnlyList<MissingIndexInfo> MissingIndexes { get; init; } = [];
 }
 
 public sealed class SessionActivityInfo

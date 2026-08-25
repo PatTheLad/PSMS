@@ -1,3 +1,7 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
 @if (Busy && Snapshot is null)
 {
     <MudProgressLinear Indeterminate="true" Class="mb-3" />
@@ -47,6 +51,7 @@ else
                 <MudTh>Wait</MudTh>
                 <MudTh>Elapsed</MudTh>
                 <MudTh>SQL</MudTh>
+                <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.SessionId</MudTd>
@@ -55,8 +60,44 @@ else
                 <MudTd>@context.Status / @context.Command</MudTd>
                 <MudTd>@context.WaitType</MudTd>
                 <MudTd>@context.ElapsedTimeMs.ToString("N0") ms</MudTd>
-                <MudTd Style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--psms-mono);font-size:12px">
+                <MudTd Style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--psms-mono);font-size:12px">
                     @(context.SqlText ?? "—")
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Color="Color.Error"
+                                   title="KILL session" Disabled="Busy || _killing" OnClick="() => KillAsync(context.SessionId)" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Missing index recommendations</MudText>
+    @if (Snapshot.MissingIndexes.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">No missing-index suggestions right now (or DMVs unavailable).</MudText>
+    }
+    else
+    {
+        <MudTable Items="Snapshot.MissingIndexes" Dense="true" Hover="true" Class="mb-4 psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>Impact</MudTh>
+                <MudTh>Table</MudTh>
+                <MudTh>Equality</MudTh>
+                <MudTh>Inequality</MudTh>
+                <MudTh>Include</MudTh>
+                <MudTh>Seeks/Scans</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ImpactScore.ToString("N0")</MudTd>
+                <MudTd Style="font-family:var(--psms-mono);font-size:12px">@context.Database.@context.Schema.@context.Table</MudTd>
+                <MudTd>@context.EqualityColumns</MudTd>
+                <MudTd>@context.InequalityColumns</MudTd>
+                <MudTd>@context.IncludedColumns</MudTd>
+                <MudTd>@context.UserSeeks / @context.UserScans</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                   title="Copy CREATE INDEX" OnClick="() => CopyIndexAsync(context)" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -87,12 +128,51 @@ else
 }
 
 @code {
+    [Parameter] public ConnectionDefinition? Connection { get; set; }
     [Parameter] public ServerAnalysisSnapshot? Snapshot { get; set; }
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+
+    private bool _killing;
 
     private string AgentColor => Snapshot?.Agent.AgentRunning == true
         ? "color:var(--mud-palette-success)"
         : Snapshot?.Agent.AgentAvailable == true
             ? "color:var(--mud-palette-warning)"
             : "color:var(--mud-palette-error)";
+
+    private async Task KillAsync(int sessionId)
+    {
+        if (Connection is null) return;
+        _killing = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.KillSessionAsync(Connection, password, sessionId);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+            if (result.Succeeded)
+            {
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _killing = false;
+        }
+    }
+
+    private async Task CopyIndexAsync(MissingIndexInfo info)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", info.CreateIndexStatement);
+            Snackbar.Add("CREATE INDEX statement copied.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add(info.CreateIndexStatement, Severity.Info);
+        }
+    }
 }

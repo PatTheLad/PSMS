@@ -220,7 +220,8 @@
 
         try
         {
-            tab.LastResult = await QueryRunner.ExecuteAsync(connection, tab.Database, sql);
+            tab.LastResult = await QueryRunner.ExecuteAsync(
+                connection, tab.Database, sql, includeActualPlan: Sessions.IncludeActualPlan);
             if (!string.IsNullOrEmpty(tab.LastResult.Error) && tab.LastResult.Error != "Cancelled")
             {
                 Snackbar.Add(tab.LastResult.Error, Severity.Error);

@@ -1,5 +1,6 @@
 @inject ISqlServerAdminService Admin
 @inject IConnectionStore Store
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <div class="psms-admin-toolbar">
@@ -8,6 +9,8 @@
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">@_status.Detail</MudText>
     }
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="ml-2"
+               StartIcon="@Icons.Material.Filled.Add" Disabled="_loading || Busy" OnClick="CreateJobAsync">New job</MudButton>
     <MudSpacer />
     <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
                   Placeholder="Filter jobs…" Style="max-width:220px" Adornment="Adornment.Start"
@@ -204,6 +207,23 @@
         {
             _loading = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task CreateJobAsync()
+    {
+        var parameters = new DialogParameters<CreateAgentJobDialog>
+        {
+            { x => x.Connection, Connection },
+            { x => x.DefaultDatabase, Connection.Database ?? "master" }
+        };
+        var dialog = await DialogService.ShowAsync<CreateAgentJobDialog>(
+            "New Agent job", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
         }
     }
 

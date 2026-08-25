@@ -34,7 +34,8 @@ public sealed class QueryRunner
         ConnectionDefinition connection,
         string database,
         string sql,
-        CancellationToken externalToken = default)
+        CancellationToken externalToken = default,
+        bool includeActualPlan = false)
     {
         Cancel();
         _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
@@ -49,6 +50,8 @@ public sealed class QueryRunner
         var rowsAffected = 0;
         long elapsed = 0;
         string? error = null;
+        string? planXml = null;
+        IReadOnlyList<PlanNodeSummary> planNodes = [];
 
         try
         {
@@ -56,13 +59,21 @@ public sealed class QueryRunner
             {
                 token.ThrowIfCancellationRequested();
                 messages.Add($"--- Batch {i + 1} of {batches.Count} ---");
-                var batchResult = await provider.ExecuteQueryAsync(connection, password, database, batches[i], 10_000, token)
+                // Capture plan on the last batch only (typical SSMS behavior for multi-batch scripts).
+                var wantPlan = includeActualPlan && i == batches.Count - 1;
+                var batchResult = await provider.ExecuteQueryAsync(
+                        connection, password, database, batches[i], 10_000, token, wantPlan)
                     .ConfigureAwait(false);
 
                 allSets.AddRange(batchResult.ResultSets);
                 messages.AddRange(batchResult.Messages);
                 rowsAffected += batchResult.RowsAffected;
                 elapsed += batchResult.ElapsedMilliseconds;
+                if (!string.IsNullOrWhiteSpace(batchResult.ExecutionPlanXml))
+                {
+                    planXml = batchResult.ExecutionPlanXml;
+                    planNodes = batchResult.PlanNodes;
+                }
 
                 if (!string.IsNullOrEmpty(batchResult.Error))
                 {
@@ -80,7 +91,9 @@ public sealed class QueryRunner
                 Messages = messages.Concat(["Query cancelled."]).ToList(),
                 ElapsedMilliseconds = elapsed,
                 RowsAffected = rowsAffected,
-                Error = "Cancelled"
+                Error = "Cancelled",
+                ExecutionPlanXml = planXml,
+                PlanNodes = planNodes
             };
         }
 
@@ -90,7 +103,9 @@ public sealed class QueryRunner
             Messages = messages,
             ElapsedMilliseconds = elapsed,
             RowsAffected = rowsAffected,
-            Error = error
+            Error = error,
+            ExecutionPlanXml = planXml,
+            PlanNodes = planNodes
         };
     }
 }

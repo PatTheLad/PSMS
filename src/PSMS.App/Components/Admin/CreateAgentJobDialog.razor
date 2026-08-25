@@ -1,0 +1,79 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudTextField @bind-Value="_request.JobName" Label="Job name" Required="true" />
+            <MudTextField @bind-Value="_request.Description" Label="Description" />
+            <MudTextField @bind-Value="_request.StepName" Label="Step name" />
+            <MudTextField @bind-Value="_request.DatabaseName" Label="Database for step" />
+            <MudTextField @bind-Value="_request.Command" Label="T-SQL command" Lines="6"
+                          Style="font-family:var(--psms-mono)" Required="true" />
+            <MudCheckBox @bind-Value="_request.Enabled" Label="Enabled" Color="Color.Primary" />
+            <MudCheckBox @bind-Value="_request.StartImmediately" Label="Start immediately after create" Color="Color.Secondary" />
+            @if (_messages.Count > 0)
+            {
+                <MudPaper Class="pa-2" Style="max-height:120px;overflow:auto;background:var(--psms-panel-2)">
+                    @foreach (var m in _messages)
+                    {
+                        <MudText Typo="Typo.caption" Style="font-family:var(--psms-mono)">@m</MudText>
+                    }
+                </MudPaper>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CreateAsync"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_request.JobName) || string.IsNullOrWhiteSpace(_request.Command)">
+            Create job
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public string? DefaultDatabase { get; set; }
+
+    private readonly CreateAgentJobRequest _request = new();
+    private readonly List<string> _messages = [];
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(DefaultDatabase))
+        {
+            _request.DatabaseName = DefaultDatabase;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.CreateAgentJobAsync(Connection, password, _request);
+            _messages.AddRange(result.Messages);
+            if (result.Succeeded)
+            {
+                Snackbar.Add(result.Message ?? "Job created.", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(_request.JobName));
+            }
+            else
+            {
+                Snackbar.Add(result.Error ?? "Create failed.", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

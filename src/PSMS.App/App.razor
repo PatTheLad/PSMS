@@ -30,6 +30,8 @@
                    Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                    Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
+        <MudCheckBox T="bool" Value="Sessions.IncludeActualPlan" ValueChanged="OnIncludePlanChanged"
+                     Label="Actual plan" Dense="true" Class="ml-1" Color="Color.Secondary" />
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
         <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
@@ -200,6 +202,12 @@
         {
             Sessions.ShowAdmin();
         }
+    }
+
+    private void OnIncludePlanChanged(bool value)
+    {
+        Sessions.IncludeActualPlan = value;
+        Sessions.Notify();
     }
 
     private async Task StartExplorerDrag()

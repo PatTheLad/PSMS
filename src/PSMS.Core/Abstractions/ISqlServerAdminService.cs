@@ -86,6 +86,38 @@ public interface ISqlServerAdminService
         bool enabled,
         CancellationToken cancellationToken = default);
 
+    Task<AdminOperationResult> CreateAgentJobAsync(
+        ConnectionDefinition connection,
+        string? password,
+        CreateAgentJobRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminOperationResult> DropDatabaseAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        bool force = true,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminOperationResult> SetRecoveryModelAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string recoveryModel,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminOperationResult> KillSessionAsync(
+        ConnectionDefinition connection,
+        string? password,
+        int sessionId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MissingIndexInfo>> GetMissingIndexesAsync(
+        ConnectionDefinition connection,
+        string? password,
+        int top = 25,
+        CancellationToken cancellationToken = default);
+
     Task<ServerAnalysisSnapshot> GetServerAnalysisAsync(
         ConnectionDefinition connection,
         string? password,

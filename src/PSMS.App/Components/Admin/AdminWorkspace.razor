@@ -35,7 +35,7 @@
     {
         <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tab" Class="psms-admin-tabs">
             <MudTabPanel Text="Analysis" Icon="@Icons.Material.Filled.Insights" Class="psms-admin-panel">
-                <AnalysisPanel Snapshot="_snapshot" Busy="_busy" />
+                <AnalysisPanel Connection="_connection" Snapshot="_snapshot" Busy="_busy" OnChanged="RefreshAsync" />
             </MudTabPanel>
             <MudTabPanel Text="Databases" Icon="@Icons.Material.Filled.Storage" Class="psms-admin-panel">
                 <DatabasesAdminPanel Connection="_connection"

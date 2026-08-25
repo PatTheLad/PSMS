@@ -1,3 +1,8 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+
 <div class="psms-admin-toolbar">
     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
                StartIcon="@Icons.Material.Filled.Add" OnClick="Create" Disabled="Busy">Create database</MudButton>
@@ -38,15 +43,26 @@ else
                 }
             </MudTd>
             <MudTd>@context.State</MudTd>
-            <MudTd>@context.RecoveryModel</MudTd>
+            <MudTd>
+                <MudSelect T="string" Value="context.RecoveryModel" ValueChanged="v => SetRecoveryAsync(context, v)"
+                           Dense="true" Margin="Margin.Dense" Disabled="Busy || context.IsSystem || _busyDb == context.Name"
+                           Style="min-width:130px">
+                    <MudSelectItem Value="@("SIMPLE")">SIMPLE</MudSelectItem>
+                    <MudSelectItem Value="@("FULL")">FULL</MudSelectItem>
+                    <MudSelectItem Value="@("BULK_LOGGED")">BULK_LOGGED</MudSelectItem>
+                </MudSelect>
+            </MudTd>
             <MudTd>@context.DataSizeMb.ToString("N1")</MudTd>
             <MudTd>@context.LogSizeMb.ToString("N1")</MudTd>
             <MudTd>@(context.LastFullBackup?.LocalDateTime.ToString("g") ?? "—")</MudTd>
-            <MudTd>
+            <MudTd Style="white-space:nowrap">
                 <MudIconButton Icon="@Icons.Material.Filled.Backup" Size="Size.Small" title="Backup"
                                Disabled="Busy" OnClick="() => Backup(context.Name)" />
                 <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" title="Restore"
                                Disabled="Busy" OnClick="() => Restore(context.Name)" />
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small" Color="Color.Error"
+                               title="Drop database" Disabled="Busy || context.IsSystem"
+                               OnClick="() => DropAsync(context)" />
             </MudTd>
         </RowTemplate>
     </MudTable>
@@ -62,6 +78,7 @@ else
     [Parameter] public EventCallback<string?> OnRestore { get; set; }
 
     private string _filter = string.Empty;
+    private string? _busyDb;
 
     private IEnumerable<DatabaseAdminInfo> Filtered =>
         string.IsNullOrWhiteSpace(_filter)
@@ -71,4 +88,54 @@ else
     private Task Create() => OnCreate.InvokeAsync();
     private Task Backup(string db) => OnBackup.InvokeAsync(db);
     private Task Restore(string? db) => OnRestore.InvokeAsync(db);
+
+    private async Task SetRecoveryAsync(DatabaseAdminInfo db, string recovery)
+    {
+        if (string.Equals(db.RecoveryModel, recovery, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _busyDb = db.Name;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.SetRecoveryModelAsync(Connection, password, db.Name, recovery);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+            if (result.Succeeded)
+            {
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _busyDb = null;
+        }
+    }
+
+    private async Task DropAsync(DatabaseAdminInfo db)
+    {
+        var ok = await Js.InvokeAsync<bool>("confirm",
+            $"Permanently drop [{db.Name}]? Connected users will be kicked.");
+        if (!ok)
+        {
+            return;
+        }
+
+        _busyDb = db.Name;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.DropDatabaseAsync(Connection, password, db.Name, force: true);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+            if (result.Succeeded)
+            {
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _busyDb = null;
+        }
+    }
 }

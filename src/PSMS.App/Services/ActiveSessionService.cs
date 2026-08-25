@@ -36,6 +36,7 @@ public sealed class ActiveSessionService
 
     public double ExplorerWidth { get; set; } = 280;
     public double EditorRatio { get; set; } = 0.55;
+    public bool IncludeActualPlan { get; set; }
 
     /// <summary>When true, the main pane shows SQL Server Admin instead of the query workspace.</summary>
     public bool ShowAdminWorkspace { get; private set; }
