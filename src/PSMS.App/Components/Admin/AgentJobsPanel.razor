@@ -1,0 +1,287 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<div class="psms-admin-toolbar">
+    <MudChip T="string" Size="Size.Small" Color="@StatusColor" Variant="Variant.Filled">@_status.StatusText</MudChip>
+    @if (!string.IsNullOrWhiteSpace(_status.Detail))
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">@_status.Detail</MudText>
+    }
+    <MudSpacer />
+    <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                  Placeholder="Filter jobs…" Style="max-width:220px" Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search" />
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Class="mb-2" />
+}
+
+<div class="psms-agent-split">
+    <div class="psms-agent-list">
+        <MudTable Items="FilteredJobs" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None"
+                  T="AgentJobInfo" OnRowClick="OnRowClick" RowClassFunc="RowClass">
+            <HeaderContent>
+                <MudTh>Job</MudTh>
+                <MudTh>Enabled</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Last</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudText Typo="Typo.body2" Style="font-weight:600">@context.Name</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.Category · @context.StepCount step(s)</MudText>
+                </MudTd>
+                <MudTd>
+                    <MudSwitch T="bool" Value="context.Enabled" ValueChanged="v => ToggleEnabledAsync(context, v)"
+                               Color="Color.Primary" Disabled="_acting || Busy" />
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@OutcomeColor(context)">
+                        @context.CurrentStatus / @context.LastRunOutcome
+                    </MudChip>
+                </MudTd>
+                <MudTd>@(context.LastRun?.LocalDateTime.ToString("g") ?? "—")</MudTd>
+                <MudTd Style="white-space:nowrap">
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Color="Color.Success"
+                                   title="Start" Disabled="_acting || Busy" OnClick="() => StartAsync(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Error"
+                                   title="Stop" Disabled="_acting || Busy" OnClick="() => StopAsync(context)" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        @if (!_loading && _jobs.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Class="ma-2" Dense="true">
+                No Agent jobs found. On Linux SQL Server, enable Agent (`mssql-conf set sqlagent.enabled true` and restart)
+                then create jobs in msdb — PSMS can start/stop/history them.
+            </MudAlert>
+        }
+    </div>
+
+    <div class="psms-agent-detail">
+        @if (_selected is null)
+        {
+            <MudText Class="pa-4 mud-text-secondary">Select a job to inspect steps and history.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-1">@_selected.Name</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3">
+                Owner @_selected.Owner · Next @( _selected.NextRun?.LocalDateTime.ToString("g") ?? "—" )
+            </MudText>
+            @if (!string.IsNullOrWhiteSpace(_selected.Description))
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Description</MudText>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Steps</MudText>
+            <MudTable Items="_steps" Dense="true" Hover="true" Class="mb-3 psms-admin-table" Breakpoint="Breakpoint.None">
+                <HeaderContent>
+                    <MudTh>#</MudTh>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Subsystem</MudTh>
+                    <MudTh>Database</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.StepId</MudTd>
+                    <MudTd>@context.StepName</MudTd>
+                    <MudTd>@context.Subsystem</MudTd>
+                    <MudTd>@context.DatabaseName</MudTd>
+                </RowTemplate>
+            </MudTable>
+            @if (_steps.Count > 0)
+            {
+                <MudExpansionPanels Class="mb-3">
+                    <MudExpansionPanel Text="Step commands">
+                        @foreach (var step in _steps)
+                        {
+                            <MudText Typo="Typo.caption" Style="font-weight:600">@step.StepId. @step.StepName</MudText>
+                            <pre class="psms-code-block">@step.Command</pre>
+                        }
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mb-1">History</MudText>
+            <MudTable Items="_history" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+                <HeaderContent>
+                    <MudTh>When</MudTh>
+                    <MudTh>Step</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Duration</MudTh>
+                    <MudTh>Message</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.RunDate.LocalDateTime.ToString("g")</MudTd>
+                    <MudTd>@context.StepName</MudTd>
+                    <MudTd>@context.RunStatus</MudTd>
+                    <MudTd>@context.RunDuration</MudTd>
+                    <MudTd Style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="@context.Message">
+                        @context.Message
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnStatusChanged { get; set; }
+
+    private readonly List<AgentJobInfo> _jobs = [];
+    private readonly List<AgentJobStepInfo> _steps = [];
+    private readonly List<AgentJobHistoryEntry> _history = [];
+    private AgentServiceStatus _status = new() { StatusText = "…" };
+    private AgentJobInfo? _selected;
+    private string _filter = string.Empty;
+    private bool _loading;
+    private bool _acting;
+
+    private Color StatusColor => _status.AgentRunning ? Color.Success : _status.AgentAvailable ? Color.Warning : Color.Error;
+
+    private IEnumerable<AgentJobInfo> FilteredJobs =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _jobs
+            : _jobs.Where(j => j.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                               || j.Category.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_jobs.Count == 0 && !_loading)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private string RowClass(AgentJobInfo job, int _)
+        => _selected?.JobId == job.JobId ? "psms-row-selected" : string.Empty;
+
+    private async Task OnRowClick(TableRowClickEventArgs<AgentJobInfo> args)
+    {
+        if (args.Item is null) return;
+        await SelectJobAsync(args.Item);
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _status = await Admin.GetAgentStatusAsync(Connection, password);
+            var jobs = await Admin.GetAgentJobsAsync(Connection, password);
+            _jobs.Clear();
+            _jobs.AddRange(jobs);
+            if (_selected is not null)
+            {
+                var still = _jobs.FirstOrDefault(j => j.JobId == _selected.JobId);
+                if (still is not null)
+                {
+                    await SelectJobAsync(still);
+                }
+                else
+                {
+                    _selected = null;
+                    _steps.Clear();
+                    _history.Clear();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Agent load failed: {ex.Message}", Severity.Error);
+            _status = new AgentServiceStatus { StatusText = "Error", Detail = ex.Message };
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectJobAsync(AgentJobInfo job)
+    {
+        _selected = job;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _steps.Clear();
+            _steps.AddRange(await Admin.GetAgentJobStepsAsync(Connection, password, job.JobId));
+            _history.Clear();
+            _history.AddRange(await Admin.GetAgentJobHistoryAsync(Connection, password, job.JobId));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task StartAsync(AgentJobInfo job)
+    {
+        _acting = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.StartAgentJobAsync(Connection, password, job.Name);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private async Task StopAsync(AgentJobInfo job)
+    {
+        _acting = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.StopAgentJobAsync(Connection, password, job.Name);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private async Task ToggleEnabledAsync(AgentJobInfo job, bool enabled)
+    {
+        _acting = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.SetAgentJobEnabledAsync(Connection, password, job.Name, enabled);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private static Color OutcomeColor(AgentJobInfo job) => job.LastRunOutcome switch
+    {
+        "Succeeded" => Color.Success,
+        "Failed" => Color.Error,
+        "Canceled" => Color.Warning,
+        "In progress" or "Executing" => Color.Info,
+        _ => Color.Default
+    };
+}

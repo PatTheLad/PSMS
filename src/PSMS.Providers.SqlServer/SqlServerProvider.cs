@@ -397,34 +397,7 @@ public sealed class SqlServerProvider : IDbProvider
     }
 
     private static SqlConnection CreateConnection(ConnectionDefinition connection, string? password, string? databaseOverride)
-    {
-        var builder = new SqlConnectionStringBuilder
-        {
-            DataSource = BuildDataSource(connection),
-            InitialCatalog = string.IsNullOrWhiteSpace(databaseOverride)
-                ? (connection.Database ?? "master")
-                : databaseOverride,
-            Encrypt = connection.Encrypt,
-            TrustServerCertificate = connection.TrustServerCertificate,
-            PersistSecurityInfo = false,
-            ApplicationName = "PSMS"
-        };
-
-        if (connection.UseWindowsAuth)
-        {
-            builder.IntegratedSecurity = true;
-        }
-        else
-        {
-            builder.UserID = connection.UserName ?? string.Empty;
-            builder.Password = password ?? string.Empty;
-        }
-
-        return new SqlConnection(builder.ConnectionString);
-    }
-
-    private static string BuildDataSource(ConnectionDefinition connection)
-        => connection.Port is > 0 ? $"{connection.Server},{connection.Port}" : connection.Server;
+        => SqlServerConnectionFactory.Create(connection, password, databaseOverride);
 
     private static async Task<IReadOnlyList<T>> QueryStringsAsync<T>(
         ConnectionDefinition connection,

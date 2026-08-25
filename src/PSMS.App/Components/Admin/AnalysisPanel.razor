@@ -1,0 +1,98 @@
+@if (Busy && Snapshot is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="mb-3" />
+}
+else if (Snapshot is null)
+{
+    <MudText Class="pa-4 mud-text-secondary">No analysis data yet.</MudText>
+}
+else
+{
+    <div class="psms-admin-grid">
+        <MudPaper Class="pa-3 psms-stat-card">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Server</MudText>
+            <MudText Typo="Typo.h6">@Snapshot.ServerName</MudText>
+            <MudText Typo="Typo.caption">@Snapshot.Edition · @Snapshot.Version @Snapshot.ProductLevel</MudText>
+        </MudPaper>
+        <MudPaper Class="pa-3 psms-stat-card">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Resources</MudText>
+            <MudText Typo="Typo.h6">@Snapshot.CpuCount CPU · @Snapshot.PhysicalMemoryMb.ToString("N0") MB RAM</MudText>
+            <MudText Typo="Typo.caption">Up since @Snapshot.ServerStartTime.LocalDateTime.ToString("g")</MudText>
+        </MudPaper>
+        <MudPaper Class="pa-3 psms-stat-card">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Storage</MudText>
+            <MudText Typo="Typo.h6">@Snapshot.UserDatabaseCount user DBs</MudText>
+            <MudText Typo="Typo.caption">Data @Snapshot.TotalDataSizeMb.ToString("N1") MB · Log @Snapshot.TotalLogSizeMb.ToString("N1") MB</MudText>
+        </MudPaper>
+        <MudPaper Class="pa-3 psms-stat-card">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">SQL Server Agent</MudText>
+            <MudText Typo="Typo.h6" Style="@AgentColor">@Snapshot.Agent.StatusText</MudText>
+            <MudText Typo="Typo.caption">@(Snapshot.Agent.Detail ?? (Snapshot.Agent.AgentAvailable ? "msdb reachable" : "not available"))</MudText>
+        </MudPaper>
+    </div>
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2">Active requests</MudText>
+    @if (Snapshot.TopSessions.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">No user requests running right now.</MudText>
+    }
+    else
+    {
+        <MudTable Items="Snapshot.TopSessions" Dense="true" Hover="true" Class="mb-4 psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>SPID</MudTh>
+                <MudTh>Login</MudTh>
+                <MudTh>DB</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Wait</MudTh>
+                <MudTh>Elapsed</MudTh>
+                <MudTh>SQL</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SessionId</MudTd>
+                <MudTd>@context.LoginName</MudTd>
+                <MudTd>@context.Database</MudTd>
+                <MudTd>@context.Status / @context.Command</MudTd>
+                <MudTd>@context.WaitType</MudTd>
+                <MudTd>@context.ElapsedTimeMs.ToString("N0") ms</MudTd>
+                <MudTd Style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--psms-mono);font-size:12px">
+                    @(context.SqlText ?? "—")
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Top waits (cumulative)</MudText>
+    @if (Snapshot.TopWaits.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Wait stats unavailable.</MudText>
+    }
+    else
+    {
+        <MudTable Items="Snapshot.TopWaits" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>Wait type</MudTh>
+                <MudTh>Tasks</MudTh>
+                <MudTh>Wait (s)</MudTh>
+                <MudTh>Signal (s)</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-family:var(--psms-mono)">@context.WaitType</MudTd>
+                <MudTd>@context.WaitingTasksCount.ToString("N0")</MudTd>
+                <MudTd>@context.WaitTimeSec.ToString("N1")</MudTd>
+                <MudTd>@context.SignalWaitTimeSec.ToString("N1")</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@code {
+    [Parameter] public ServerAnalysisSnapshot? Snapshot { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    private string AgentColor => Snapshot?.Agent.AgentRunning == true
+        ? "color:var(--mud-palette-success)"
+        : Snapshot?.Agent.AgentAvailable == true
+            ? "color:var(--mud-palette-warning)"
+            : "color:var(--mud-palette-error)";
+}

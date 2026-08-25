@@ -20,6 +20,7 @@ internal static class Program
         appBuilder.Services.AddMudServices();
         appBuilder.Services.AddSingleton<IConnectionStore, FileConnectionStore>();
         appBuilder.Services.AddSingleton<IDbProvider, SqlServerProvider>();
+        appBuilder.Services.AddSingleton<ISqlServerAdminService, SqlServerAdminService>();
         appBuilder.Services.AddSingleton<IDbProviderFactory, DbProviderFactory>();
         appBuilder.Services.AddSingleton<ActiveSessionService>();
         appBuilder.Services.AddSingleton<QueryRunner>();

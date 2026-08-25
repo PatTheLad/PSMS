@@ -37,6 +37,21 @@ public sealed class ActiveSessionService
     public double ExplorerWidth { get; set; } = 280;
     public double EditorRatio { get; set; } = 0.55;
 
+    /// <summary>When true, the main pane shows SQL Server Admin instead of the query workspace.</summary>
+    public bool ShowAdminWorkspace { get; private set; }
+
+    public void ShowAdmin()
+    {
+        ShowAdminWorkspace = true;
+        Notify();
+    }
+
+    public void ShowQueries()
+    {
+        ShowAdminWorkspace = false;
+        Notify();
+    }
+
     public void SelectConnection(Guid connectionId)
     {
         SelectedConnectionId = connectionId;

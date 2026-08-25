@@ -1,0 +1,90 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Restore into <strong>@(_request.Database)</strong> from a .bak on the SQL Server host.
+            </MudText>
+            <MudTextField @bind-Value="_request.Database" Label="Target database" Required="true" />
+            <MudTextField @bind-Value="_request.BackupPath" Label="Backup path (.bak)" Required="true"
+                          HelperText="Path must be readable by the SQL Server service" />
+            <MudCheckBox @bind-Value="_request.Replace" Label="REPLACE existing database (kicks users)" Color="Color.Warning" />
+            <MudCheckBox @bind-Value="_request.Recover" Label="RECOVERY (bring online)" Color="Color.Primary" />
+            @if (_messages.Count > 0)
+            {
+                <MudPaper Class="pa-2" Style="max-height:160px;overflow:auto;background:var(--psms-panel-2)">
+                    @foreach (var m in _messages)
+                    {
+                        <MudText Typo="Typo.caption" Style="font-family:var(--psms-mono)">@m</MudText>
+                    }
+                </MudPaper>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="RunAsync"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_request.Database) || string.IsNullOrWhiteSpace(_request.BackupPath)">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Restore
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public string? Database { get; set; }
+    [Parameter] public string? BackupPath { get; set; }
+
+    private readonly RestoreDatabaseRequest _request = new() { Replace = true };
+    private readonly List<string> _messages = [];
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(Database))
+        {
+            _request.Database = Database;
+        }
+
+        if (!string.IsNullOrWhiteSpace(BackupPath))
+        {
+            _request.BackupPath = BackupPath;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task RunAsync()
+    {
+        _busy = true;
+        _messages.Clear();
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.RestoreDatabaseAsync(Connection, password, _request);
+            _messages.AddRange(result.Messages);
+            if (result.Succeeded)
+            {
+                Snackbar.Add($"{result.Message} ({result.ElapsedMilliseconds} ms)", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add(result.Error ?? "Restore failed.", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
