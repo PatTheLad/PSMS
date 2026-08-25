@@ -56,7 +56,7 @@
         </aside>
         <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
              @onmousedown="StartExplorerDrag"></div>
-        <section class="psms-main">
+        <section class="psms-main @(Sessions.ShowAdminWorkspace ? "psms-main-admin" : null)">
             @if (Sessions.ShowAdminWorkspace)
             {
                 <AdminWorkspace />

@@ -94,6 +94,10 @@ html, body {
     background: var(--psms-bg);
 }
 
+.psms-main.psms-main-admin {
+    grid-template-rows: minmax(0, 1fr);
+}
+
 .psms-hsplit {
     cursor: row-resize;
     background: var(--psms-border);
@@ -415,6 +419,7 @@ html, body {
     min-height: 0;
     height: 100%;
     background: var(--psms-bg);
+    overflow: hidden;
 }
 
 .psms-admin-header {
@@ -431,7 +436,20 @@ html, body {
     padding: 0.75rem 1rem 1rem;
     min-height: 0;
     overflow: auto;
-    height: calc(100vh - 140px);
+    flex: 1 1 auto;
+}
+
+.psms-admin-tabs {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+.psms-admin-tabs .mud-tabs-panels {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 .psms-admin-toolbar {
