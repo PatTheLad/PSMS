@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Data.SqlClient;
 using PSMS.Core.Abstractions;
 using PSMS.Core.Models;
+using PSMS.Core.Sql;
 
 namespace PSMS.Providers.SqlServer;
 
@@ -146,6 +147,135 @@ public sealed class SqlServerProvider : IDbProvider
                 reader.GetInt32(4) == 1,
                 reader.IsDBNull(5) ? null : Convert.ToInt32(reader.GetValue(5)),
                 reader.GetInt32(6)));
+        }
+
+        return results;
+    }
+
+    public async Task<TableSchemaOverview> GetTableSchemaOverviewAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string schema,
+        string table,
+        CancellationToken cancellationToken = default)
+    {
+        var columns = await GetColumnsAsync(connection, password, database, schema, table, cancellationToken).ConfigureAwait(false);
+        var indexes = await GetIndexesAsync(connection, password, database, schema, table, cancellationToken).ConfigureAwait(false);
+        var fks = await GetForeignKeysAsync(connection, password, database, schema, table, cancellationToken).ConfigureAwait(false);
+        return new TableSchemaOverview
+        {
+            Columns = columns,
+            Indexes = indexes,
+            ForeignKeys = fks
+        };
+    }
+
+    private static async Task<IReadOnlyList<IndexInfo>> GetIndexesAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string schema,
+        string table,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT
+                i.name,
+                CAST(i.is_unique AS int),
+                CAST(i.is_primary_key AS int),
+                i.type_desc,
+                STUFF((
+                    SELECT ', ' + c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END
+                    FROM sys.index_columns ic
+                    INNER JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                    WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
+                    ORDER BY ic.key_ordinal
+                    FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS cols
+            FROM sys.indexes i
+            INNER JOIN sys.tables t ON t.object_id = i.object_id
+            INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+            WHERE s.name = @schema
+              AND t.name = @table
+              AND i.index_id > 0
+              AND i.name IS NOT NULL
+            ORDER BY i.is_primary_key DESC, i.name;
+            """;
+
+        await using var sqlConnection = CreateConnection(connection, password, database);
+        await sqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new SqlCommand(sql, sqlConnection);
+        command.Parameters.AddWithValue("@schema", schema);
+        command.Parameters.AddWithValue("@table", table);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        var results = new List<IndexInfo>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(new IndexInfo(
+                reader.GetString(0),
+                reader.GetInt32(1) == 1,
+                reader.GetInt32(2) == 1,
+                reader.GetString(3),
+                reader.IsDBNull(4) ? string.Empty : reader.GetString(4)));
+        }
+
+        return results;
+    }
+
+    private static async Task<IReadOnlyList<ForeignKeyInfo>> GetForeignKeysAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string schema,
+        string table,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT
+                fk.name,
+                STUFF((
+                    SELECT ', ' + c.name
+                    FROM sys.foreign_key_columns fkc
+                    INNER JOIN sys.columns c ON c.object_id = fkc.parent_object_id AND c.column_id = fkc.parent_column_id
+                    WHERE fkc.constraint_object_id = fk.object_id
+                    ORDER BY fkc.constraint_column_id
+                    FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS cols,
+                rs.name,
+                rt.name,
+                STUFF((
+                    SELECT ', ' + c.name
+                    FROM sys.foreign_key_columns fkc
+                    INNER JOIN sys.columns c ON c.object_id = fkc.referenced_object_id AND c.column_id = fkc.referenced_column_id
+                    WHERE fkc.constraint_object_id = fk.object_id
+                    ORDER BY fkc.constraint_column_id
+                    FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS ref_cols
+            FROM sys.foreign_keys fk
+            INNER JOIN sys.tables t ON t.object_id = fk.parent_object_id
+            INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+            INNER JOIN sys.tables rt ON rt.object_id = fk.referenced_object_id
+            INNER JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+            WHERE s.name = @schema
+              AND t.name = @table
+            ORDER BY fk.name;
+            """;
+
+        await using var sqlConnection = CreateConnection(connection, password, database);
+        await sqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new SqlCommand(sql, sqlConnection);
+        command.Parameters.AddWithValue("@schema", schema);
+        command.Parameters.AddWithValue("@table", table);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        var results = new List<ForeignKeyInfo>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(new ForeignKeyInfo(
+                reader.GetString(0),
+                reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? string.Empty : reader.GetString(4)));
         }
 
         return results;
@@ -305,6 +435,7 @@ public sealed class SqlServerProvider : IDbProvider
                 }
 
                 var rows = new List<IReadOnlyList<object?>>();
+                var displayRows = new List<IReadOnlyList<string?>>();
                 var truncated = false;
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -317,18 +448,23 @@ public sealed class SqlServerProvider : IDbProvider
                     var row = new object?[reader.FieldCount];
                     for (var i = 0; i < reader.FieldCount; i++)
                     {
-                        row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[i] = ResultMaterializer.ReadCell(reader, i);
                     }
 
                     rows.Add(row);
+                    displayRows.Add(ResultMaterializer.FormatRow(row));
                 }
 
                 if (truncated)
                 {
-                    messages.Add($"Result set {resultSets.Count + 1}: truncated at {maxRows:N0} rows.");
-                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    messages.Add($"Result set {resultSets.Count + 1}: truncated at {maxRows:N0} rows (remaining rows not fetched).");
+                    try
                     {
-                        // drain remaining rows in this result
+                        command.Cancel();
+                    }
+                    catch
+                    {
+                        // ignored — cancel best-effort so the server stops streaming
                     }
                 }
 
@@ -336,8 +472,14 @@ public sealed class SqlServerProvider : IDbProvider
                 {
                     Columns = columns,
                     Rows = rows,
+                    DisplayRows = displayRows,
                     Truncated = truncated
                 });
+
+                if (truncated)
+                {
+                    break;
+                }
             }
             while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
 
@@ -369,6 +511,119 @@ public sealed class SqlServerProvider : IDbProvider
             {
                 ResultSets = resultSets,
                 Messages = messages.Concat(["Query cancelled."]).ToList(),
+                ElapsedMilliseconds = sw.ElapsedMilliseconds,
+                Error = "Cancelled"
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new QueryResult
+            {
+                ResultSets = resultSets,
+                Messages = messages.Concat([ex.Message]).ToList(),
+                ElapsedMilliseconds = sw.ElapsedMilliseconds,
+                Error = ex.Message
+            };
+        }
+    }
+
+    public async Task<QueryResult> ExecuteEstimatedPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var messages = new List<string> { "Estimated execution plan (SET SHOWPLAN_ALL) — query was not executed." };
+        var resultSets = new List<ResultSet>();
+
+        try
+        {
+            await using var sqlConnection = CreateConnection(connection, password, database);
+            sqlConnection.InfoMessage += (_, e) => messages.Add(e.Message);
+            await sqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            await using (var on = new SqlCommand("SET SHOWPLAN_ALL ON", sqlConnection))
+            {
+                await on.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            try
+            {
+                foreach (var batch in SqlBatchSplitter.Split(sql))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await using var command = new SqlCommand(batch, sqlConnection) { CommandTimeout = 0 };
+                    await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+                    do
+                    {
+                        if (reader.FieldCount <= 0)
+                        {
+                            continue;
+                        }
+
+                        var columns = new string[reader.FieldCount];
+                        for (var i = 0; i < reader.FieldCount; i++)
+                        {
+                            columns[i] = reader.GetName(i);
+                        }
+
+                        var rows = new List<IReadOnlyList<object?>>();
+                        var displayRows = new List<IReadOnlyList<string?>>();
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            var row = new object?[reader.FieldCount];
+                            for (var i = 0; i < reader.FieldCount; i++)
+                            {
+                                row[i] = ResultMaterializer.ReadCell(reader, i);
+                            }
+
+                            rows.Add(row);
+                            displayRows.Add(ResultMaterializer.FormatRow(row));
+                        }
+
+                        resultSets.Add(new ResultSet
+                        {
+                            Columns = columns,
+                            Rows = rows,
+                            DisplayRows = displayRows
+                        });
+                    }
+                    while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+                }
+            }
+            finally
+            {
+                try
+                {
+                    await using var off = new SqlCommand("SET SHOWPLAN_ALL OFF", sqlConnection);
+                    await off.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // connection may already be broken
+                }
+            }
+
+            sw.Stop();
+            messages.Insert(0, $"Plan ready in {sw.ElapsedMilliseconds} ms. {resultSets.Count} plan result set(s).");
+            return new QueryResult
+            {
+                ResultSets = resultSets,
+                Messages = messages,
+                ElapsedMilliseconds = sw.ElapsedMilliseconds
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            sw.Stop();
+            return new QueryResult
+            {
+                ResultSets = resultSets,
+                Messages = messages.Concat(["Cancelled."]).ToList(),
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
                 Error = "Cancelled"
             };

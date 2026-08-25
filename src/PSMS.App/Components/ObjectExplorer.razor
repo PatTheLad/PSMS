@@ -5,8 +5,10 @@
 @inject ContextMenuService Menus
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject IJSRuntime Js
 @implements IDisposable
 
+<div class="psms-explorer-root">
 <div class="psms-filter">
     <div class="psms-filter-title">
         <MudText Typo="Typo.subtitle2">Object Explorer</MudText>
@@ -15,14 +17,32 @@
         <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="RequestNew" aria-label="New connection" />
     </div>
     <MudTextField @bind-Value="_filter"
+                  @bind-Value:after="OnFilterChanged"
                   Immediate="true"
                   Margin="Margin.Dense"
                   Variant="Variant.Outlined"
-                  Placeholder="Filter connections…"
+                  Placeholder="Filter or jump to object…"
                   Adornment="Adornment.Start"
                   AdornmentIcon="@Icons.Material.Filled.Search"
                   Class="psms-filter-input" />
 </div>
+
+@if (CatalogHits.Count > 0)
+{
+    <div class="psms-jump-list">
+        <div class="psms-jump-head">Jump to object (@CatalogHits.Count)</div>
+        @foreach (var hit in CatalogHits)
+        {
+            var local = hit;
+            <button type="button" class="psms-jump-item" @onclick="@(() => OpenCatalogHitAsync(local))"
+                    title="@($"{local.Kind} · {local.Database}")">
+                <span class="kind">@local.Kind</span>
+                <span class="name">@local.Label</span>
+                <span class="db">@local.Database</span>
+            </button>
+        }
+    </div>
+}
 
 <div class="psms-explorer-scroll" @oncontextmenu:preventDefault="true">
     @if (_loading)
@@ -46,9 +66,14 @@
                                  ExpandedChanged="@(e => _ = OnConnectionExpanded(connection, e))">
                     <BodyContent>
                         <div class="psms-node-label @(Sessions.IsConnected(connection.Id) ? "connected" : null)"
+                             style="@ConnAccentStyle(connection)"
                              @oncontextmenu="@(e => OpenConnectionMenu(e, connection))"
                              @oncontextmenu:preventDefault="true"
                              @oncontextmenu:stopPropagation="true">
+                            @if (!string.IsNullOrWhiteSpace(connection.Color))
+                            {
+                                <span class="psms-conn-dot" style="@($"background:{connection.Color}")"></span>
+                            }
                             @connection.Name
                         </div>
                     </BodyContent>
@@ -107,6 +132,7 @@
                                                                                          ExpandedChanged="@(e => _ = OnTableExpanded(connection, db.Name, schema.Name, table.Name, e))">
                                                                             <BodyContent>
                                                                                 <div class="psms-node-label"
+                                                                                     @ondblclick="@(() => SelectTop1000(connection, db.Name, schema.Name, table.Name))"
                                                                                      @oncontextmenu="@(e => OpenTableMenu(e, connection, db.Name, schema.Name, table.Name))"
                                                                                      @oncontextmenu:preventDefault="true"
                                                                                      @oncontextmenu:stopPropagation="true">
@@ -146,6 +172,7 @@
                                                                             <MudTreeViewItem Value="@($"v:{schemaKey}:{view.Name}")" Icon="@Icons.Material.Filled.Visibility">
                                                                                 <BodyContent>
                                                                                     <div class="psms-node-label"
+                                                                                         @ondblclick="@(() => SelectTop1000(connection, db.Name, schema.Name, view.Name))"
                                                                                          @oncontextmenu="@(e => OpenViewMenu(e, connection, db.Name, schema.Name, view.Name))"
                                                                                          @oncontextmenu:preventDefault="true"
                                                                                          @oncontextmenu:stopPropagation="true">
@@ -226,6 +253,7 @@
         </MudTreeView>
     }
 </div>
+</div>
 
 @code {
     [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string? Sql, string? Title)> OnOpenQuery { get; set; }
@@ -245,26 +273,135 @@
     private readonly HashSet<Guid> _connecting = [];
     private bool _loading;
     private string _filter = string.Empty;
+    private List<CatalogHit> _catalogHits = [];
+
+    private sealed record CatalogHit(
+        CatalogObjectKind Kind,
+        string Label,
+        string Schema,
+        string Name,
+        string Database);
+
+    private IReadOnlyList<CatalogHit> CatalogHits => _catalogHits;
+
+    private bool CatalogMode => _catalogHits.Count > 0;
 
     private IReadOnlyList<ConnectionDefinition> FilteredConnections =>
-        string.IsNullOrWhiteSpace(_filter)
+        string.IsNullOrWhiteSpace(_filter) || CatalogMode
             ? _connections
             : _connections.Where(c =>
                 c.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
                 || c.Server.Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
 
     private bool PassesFilter(string name) =>
-        string.IsNullOrWhiteSpace(_filter) || name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+        CatalogMode
+        || string.IsNullOrWhiteSpace(_filter)
+        || name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+
+    private void OnFilterChanged()
+    {
+        RebuildCatalogHits();
+        StateHasChanged();
+    }
+
+    private void RebuildCatalogHits()
+    {
+        _catalogHits = [];
+        var needle = _filter.Trim();
+        if (needle.Length < 2)
+        {
+            return;
+        }
+
+        var snap = IntelliSense.Current;
+        if (snap is null || snap.Objects.Count == 0)
+        {
+            return;
+        }
+
+        _catalogHits = snap.Objects
+            .Where(o => o.Kind is CatalogObjectKind.Table or CatalogObjectKind.View
+                or CatalogObjectKind.Procedure or CatalogObjectKind.Function)
+            .Where(o =>
+                o.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || (o.Schema?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false)
+                || $"{o.Schema}.{o.Name}".Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(o => o.Name.StartsWith(needle, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(o => o.Kind)
+            .ThenBy(o => o.Schema, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .Select(o => new CatalogHit(
+                o.Kind,
+                string.IsNullOrEmpty(o.Schema) ? o.Name : $"{o.Schema}.{o.Name}",
+                o.Schema ?? "",
+                o.Name,
+                o.Database ?? snap.Database))
+            .ToList();
+    }
+
+    private async Task OpenCatalogHitAsync(CatalogHit hit)
+    {
+        var connection = Sessions.SelectedConnection
+                         ?? Sessions.OpenConnections.FirstOrDefault()
+                         ?? _connections.FirstOrDefault(c => Sessions.IsConnected(c.Id));
+        if (connection is null)
+        {
+            Snackbar.Add("Connect to a server first.", Severity.Warning);
+            return;
+        }
+
+        switch (hit.Kind)
+        {
+            case CatalogObjectKind.Table:
+            case CatalogObjectKind.View:
+                await SelectTop1000(connection, hit.Database, hit.Schema, hit.Name);
+                break;
+            case CatalogObjectKind.Procedure:
+                await ScriptExecAsync(connection, hit.Database, hit.Schema, hit.Name);
+                break;
+            case CatalogObjectKind.Function:
+                await NewQuery(
+                    connection,
+                    hit.Database,
+                    $"SELECT * FROM {Qualify(connection.Engine, hit.Schema, hit.Name)}();",
+                    hit.Label);
+                break;
+            default:
+                await NewQuery(connection, hit.Database, title: hit.Label);
+                break;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         Sessions.Changed += OnSessionsChanged;
         Sessions.ConnectionsChanged += OnConnectionsChanged;
+        IntelliSense.Changed += OnIntelliSenseChanged;
         await ReloadAsync();
     }
 
     private void OnSessionsChanged() => InvokeAsync(StateHasChanged);
     private void OnConnectionsChanged() => InvokeAsync(ReloadAsync);
+    private void OnIntelliSenseChanged() => InvokeAsync(() =>
+    {
+        RebuildCatalogHits();
+        StateHasChanged();
+        return Task.CompletedTask;
+    });
+
+    private async Task CopyNameAsync(string name)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", name);
+            Snackbar.Add($"Copied {name}", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Could not copy to clipboard.", Severity.Warning);
+        }
+    }
 
     public async Task ReloadAsync()
     {
@@ -323,6 +460,10 @@
         Menus.Open(e.ClientX, e.ClientY,
         [
             new ContextMenuItem { Text = "Select Top 1000", Action = () => SelectTop1000(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Select COUNT(*)", Action = () => ScriptCountAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Script INSERT", Action = () => ScriptInsertAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{table}") },
+            new ContextMenuItem { Text = "Schema overview", Action = () => OpenSchemaOverviewAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptTableAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) }
         ]);
@@ -333,6 +474,9 @@
         Menus.Open(e.ClientX, e.ClientY,
         [
             new ContextMenuItem { Text = "Select Top 1000", Action = () => SelectTop1000(connection, database, schema, view) },
+            new ContextMenuItem { Text = "Select COUNT(*)", Action = () => ScriptCountAsync(connection, database, schema, view) },
+            new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{view}") },
+            new ContextMenuItem { Text = "Schema overview", Action = () => OpenSchemaOverviewAsync(connection, database, schema, view) },
             new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, view, "View") }
         ]);
     }
@@ -341,8 +485,10 @@
     {
         Menus.Open(e.ClientX, e.ClientY,
         [
+            new ContextMenuItem { Text = "Script EXEC", Action = () => ScriptExecAsync(connection, database, schema, proc) },
+            new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{proc}") },
             new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, proc, "Procedure") },
-            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database, $"EXEC [{schema}].[{proc}];", proc) }
+            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) }
         ]);
     }
 
@@ -629,8 +775,91 @@
 
     private Task SelectTop1000(ConnectionDefinition connection, string database, string schema, string table)
     {
-        var sql = $"SELECT TOP (1000) *{System.Environment.NewLine}FROM [{schema}].[{table}];";
+        var sql = BuildSelectTopSql(connection.Engine, schema, table);
         return NewQuery(connection, database, sql, $"{schema}.{table}");
+    }
+
+    private Task ScriptCountAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        var qualified = Qualify(connection.Engine, schema, table);
+        var sql = $"SELECT COUNT(*) AS [RowCount]{System.Environment.NewLine}FROM {qualified};";
+        if (connection.Engine != DbEngine.SqlServer)
+        {
+            sql = $"SELECT COUNT(*) AS RowCount{System.Environment.NewLine}FROM {qualified};";
+        }
+
+        return NewQuery(connection, database, sql, $"COUNT {schema}.{table}");
+    }
+
+    private async Task ScriptInsertAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            var columns = await provider.GetColumnsAsync(connection, password, database, schema, table);
+            var colNames = columns.Select(c => QuoteIdent(connection.Engine, c.Name)).ToList();
+            if (colNames.Count == 0)
+            {
+                Snackbar.Add("No columns found for INSERT script.", Severity.Warning);
+                return;
+            }
+
+            var qualified = Qualify(connection.Engine, schema, table);
+            var nl = System.Environment.NewLine;
+            var sql =
+                $"INSERT INTO {qualified} ({string.Join(", ", colNames)}){nl}" +
+                $"VALUES ({string.Join(", ", colNames.Select(_ => "NULL"))});";
+            await NewQuery(connection, database, sql, $"INSERT {schema}.{table}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private Task ScriptExecAsync(ConnectionDefinition connection, string database, string schema, string proc)
+    {
+        var sql = connection.Engine == DbEngine.SqlServer
+            ? $"EXEC [{schema}].[{proc}];"
+            : $"CALL {Qualify(connection.Engine, schema, proc)};";
+        return NewQuery(connection, database, sql, proc);
+    }
+
+    private static string BuildSelectTopSql(DbEngine engine, string schema, string table)
+    {
+        var qualified = Qualify(engine, schema, table);
+        return engine switch
+        {
+            DbEngine.SqlServer => $"SELECT TOP (1000) *{System.Environment.NewLine}FROM {qualified};",
+            _ => $"SELECT *{System.Environment.NewLine}FROM {qualified}{System.Environment.NewLine}LIMIT 1000;"
+        };
+    }
+
+    private static string Qualify(DbEngine engine, string schema, string name) =>
+        engine == DbEngine.SqlServer
+            ? $"[{schema}].[{name}]"
+            : string.IsNullOrWhiteSpace(schema) || schema is "main" or "dbo"
+                ? QuoteIdent(engine, name)
+                : $"{QuoteIdent(engine, schema)}.{QuoteIdent(engine, name)}";
+
+    private static string QuoteIdent(DbEngine engine, string ident) =>
+        engine == DbEngine.SqlServer ? $"[{ident}]" : $"\"{ident.Replace("\"", "\"\"")}\"";
+
+    private async Task OpenSchemaOverviewAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        var parameters = new DialogParameters<SchemaOverviewDialog>
+        {
+            { x => x.Connection, connection },
+            { x => x.Database, database },
+            { x => x.Schema, schema },
+            { x => x.Table, table }
+        };
+        await DialogService.ShowAsync<SchemaOverviewDialog>($"{schema}.{table}", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        });
     }
 
     private async Task ScriptTableAsync(ConnectionDefinition connection, string database, string schema, string table)
@@ -678,6 +907,9 @@
         Snackbar.Add("Connection deleted.", Severity.Info);
     }
 
+    private static string? ConnAccentStyle(ConnectionDefinition connection) =>
+        string.IsNullOrWhiteSpace(connection.Color) ? null : $"--psms-conn-color:{connection.Color}";
+
     private static string Key(Guid connectionId, params string[] parts)
         => string.Join(':', new[] { connectionId.ToString() }.Concat(parts));
 
@@ -685,5 +917,6 @@
     {
         Sessions.Changed -= OnSessionsChanged;
         Sessions.ConnectionsChanged -= OnConnectionsChanged;
+        IntelliSense.Changed -= OnIntelliSenseChanged;
     }
 }

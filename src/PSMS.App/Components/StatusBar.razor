@@ -2,7 +2,7 @@
 @inject SchemaIntelliSenseService IntelliSense
 @implements IDisposable
 
-<div class="psms-status">
+<div class="psms-status" style="@StatusAccentStyle">
     @if (Sessions.ActiveTab?.IsExecuting == true)
     {
         <span class="busy">Executing…</span>
@@ -14,7 +14,13 @@
 
     @if (ActiveConnection is { } conn)
     {
-        <span title="@($"{conn.Name} · {conn.Server}")"><strong>@conn.Name</strong> · @conn.Server</span>
+        <span class="psms-status-conn" title="@($"{conn.Name} · {conn.Server}")">
+            @if (!string.IsNullOrWhiteSpace(conn.Color))
+            {
+                <span class="psms-conn-dot" style="@($"background:{conn.Color}")"></span>
+            }
+            <strong>@conn.Name</strong> · @conn.Server
+        </span>
         <span>DB: <strong>@(Sessions.ActiveTab?.Database ?? conn.Database ?? "master")</strong></span>
     }
     else
@@ -62,6 +68,17 @@
             }
 
             return Sessions.SelectedConnection;
+        }
+    }
+
+    private string? StatusAccentStyle
+    {
+        get
+        {
+            var color = ActiveConnection?.Color;
+            return string.IsNullOrWhiteSpace(color)
+                ? null
+                : $"--psms-status-accent:{color};box-shadow:inset 3px 0 0 {color}";
         }
     }
 

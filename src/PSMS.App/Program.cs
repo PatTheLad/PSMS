@@ -16,11 +16,21 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // Help GTK/KDE associate the process with our icon theme name on Linux.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            Environment.SetEnvironmentVariable("GDK_BACKEND",
+                Environment.GetEnvironmentVariable("GDK_BACKEND") ?? "x11");
+        }
+
         var appBuilder = PhotinoBlazorAppBuilder.CreateDefault(args);
 
         appBuilder.Services.AddLogging();
         appBuilder.Services.AddMudServices();
         appBuilder.Services.AddSingleton<IConnectionStore, FileConnectionStore>();
+        appBuilder.Services.AddSingleton<QueryHistoryStore>();
+        appBuilder.Services.AddSingleton<SnippetStore>();
+        appBuilder.Services.AddSingleton<UiLayoutStore>();
         appBuilder.Services.AddSingleton<IDbProvider, SqlServerProvider>();
         appBuilder.Services.AddSingleton<IDbProvider, SqliteProvider>();
         appBuilder.Services.AddSingleton<IDbProvider, AccessProvider>();
@@ -43,11 +53,14 @@ internal static class Program
         var host = app.Services.GetRequiredService<PhotinoHost>();
         host.Window = app.MainBlazorWindow.Window;
 
-        app.MainBlazorWindow.Window
+        var window = app.MainBlazorWindow.Window
+            .SetLogVerbosity(0)
             .SetTitle("PSMS — SQL Management Studio")
             .SetUseOsDefaultSize(false)
             .SetSize(1440, 920)
             .SetMinSize(960, 640);
+
+        ApplyWindowIcon(window);
 
         AppDomain.CurrentDomain.UnhandledException += (_, error) =>
         {
@@ -69,5 +82,61 @@ internal static class Program
         }
 
         app.Run();
+    }
+
+    private static void ApplyWindowIcon(Photino.NET.PhotinoWindow window)
+    {
+        // Photino/GTK on Linux reliably picks up PNG/ICO next to the executable.
+        foreach (var name in new[] { "appicon.png", "favicon.ico", "icon.png" })
+        {
+            foreach (var dir in new[] { AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "wwwroot") })
+            {
+                var path = Path.GetFullPath(Path.Combine(dir, name));
+                if (!File.Exists(path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    window.SetIconFile(path);
+                    Console.WriteLine($"PSMS: window icon → {path}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"PSMS: SetIconFile failed for {path}: {ex.Message}");
+                }
+            }
+        }
+
+        // Last resort: extract embedded icon to a temp file.
+        try
+        {
+            var asm = typeof(Program).Assembly;
+            foreach (var resource in new[] { "PSMS.App.wwwroot.appicon.png", "PSMS.App.wwwroot.favicon.ico" })
+            {
+                using var stream = asm.GetManifestResourceStream(resource);
+                if (stream is null)
+                {
+                    continue;
+                }
+
+                var ext = resource.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) ? ".ico" : ".png";
+                var temp = Path.Combine(Path.GetTempPath(), "psms-appicon" + ext);
+                using (var fs = File.Create(temp))
+                {
+                    stream.CopyTo(fs);
+                }
+
+                window.SetIconFile(temp);
+                Console.WriteLine($"PSMS: window icon → embedded {resource}");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"PSMS: no window icon applied ({ex.Message})");
+        }
     }
 }

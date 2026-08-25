@@ -22,6 +22,8 @@ public interface IDbProvider
 
     Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(ConnectionDefinition connection, string? password, string database, string schema, string table, CancellationToken cancellationToken = default);
 
+    Task<TableSchemaOverview> GetTableSchemaOverviewAsync(ConnectionDefinition connection, string? password, string database, string schema, string table, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<CatalogObjectInfo>> GetCatalogObjectsAsync(ConnectionDefinition connection, string? password, string database, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ColumnInfo>> GetAllColumnsAsync(ConnectionDefinition connection, string? password, string database, CancellationToken cancellationToken = default);
@@ -36,5 +38,13 @@ public interface IDbProvider
         string database,
         string sql,
         int maxRows = 10_000,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Estimated plan (SQL Server SHOWPLAN_ALL). Other engines return a not-supported result.</summary>
+    Task<QueryResult> ExecuteEstimatedPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
         CancellationToken cancellationToken = default);
 }

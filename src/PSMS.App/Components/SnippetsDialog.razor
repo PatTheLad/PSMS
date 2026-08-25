@@ -1,0 +1,173 @@
+@using PSMS.Core.Models
+@using PSMS.Core.Storage
+@inject SnippetStore Snippets
+@inject ActiveSessionService Sessions
+@inject EditorRegistry Editors
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Saved snippets</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="psms-history-tools">
+            <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                          Placeholder="Filter snippets…" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Class="psms-history-filter" />
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="SaveCurrentAsync">Save current SQL</MudButton>
+        </div>
+        <div class="psms-history-list">
+            @if (Filtered.Count == 0)
+            {
+                <div class="psms-empty">No snippets yet. Save the active editor SQL, or bookmark one from history.</div>
+            }
+            else
+            {
+                @foreach (var snip in Filtered)
+                {
+                    <div class="psms-history-item psms-snippet-item">
+                        <button type="button" class="psms-snippet-open" @onclick="@(() => OpenAsync(snip))">
+                            <div class="psms-history-meta">
+                                <span class="ok">SNIP</span>
+                                <span>@snip.Title</span>
+                                <span>@snip.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                            </div>
+                            <pre class="psms-history-sql">@Preview(snip.Sql)</pre>
+                        </button>
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       aria-label="Rename" title="Rename"
+                                       OnClick="@(() => RenameAsync(snip))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       aria-label="Delete snippet" OnClick="@(() => DeleteAsync(snip.Id))" />
+                    </div>
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _filter = string.Empty;
+    private List<SavedSnippet> _entries = [];
+
+    private List<SavedSnippet> Filtered =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _entries
+            : _entries.Where(e =>
+                e.Title.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || e.Sql.Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Snippets.Changed += OnChanged;
+        await ReloadAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(ReloadAsync);
+
+    private async Task ReloadAsync()
+    {
+        _entries = (await Snippets.GetAllAsync()).ToList();
+        StateHasChanged();
+    }
+
+    private async Task SaveCurrentAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Snackbar.Add("Open a query tab first.", Severity.Warning);
+            return;
+        }
+
+        var sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            Snackbar.Add("Editor is empty.", Severity.Warning);
+            return;
+        }
+
+        var title = await PromptTitleAsync(tab.Title.Length > 60 ? tab.Title[..57] + "…" : tab.Title);
+        if (title is null)
+        {
+            return;
+        }
+
+        await Snippets.UpsertAsync(new SavedSnippet { Title = title, Sql = sql });
+        Snackbar.Add("Snippet saved.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task RenameAsync(SavedSnippet snip)
+    {
+        var title = await PromptTitleAsync(snip.Title);
+        if (title is null || title == snip.Title)
+        {
+            return;
+        }
+
+        snip.Title = title;
+        await Snippets.UpsertAsync(snip);
+        Snackbar.Add("Snippet renamed.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task<string?> PromptTitleAsync(string current)
+    {
+        var parameters = new DialogParameters<SnippetTitleDialog>
+        {
+            { x => x.Title, current }
+        };
+        var dialog = await DialogService.ShowAsync<SnippetTitleDialog>("Snippet title", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string title } && !string.IsNullOrWhiteSpace(title))
+        {
+            return title.Trim();
+        }
+
+        return null;
+    }
+
+    private void OpenAsync(SavedSnippet snip)
+    {
+        var conn = Sessions.SelectedConnection ?? Sessions.OpenConnections.FirstOrDefault();
+        if (conn is null)
+        {
+            Snackbar.Add("Connect to a server first.", Severity.Warning);
+            return;
+        }
+
+        var database = Sessions.ActiveTab?.Database ?? conn.Database ?? "master";
+        Sessions.OpenQueryTab(conn, database, snip.Sql, snip.Title);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await Snippets.DeleteAsync(id);
+        Snackbar.Add("Snippet deleted.", Severity.Info);
+        await ReloadAsync();
+    }
+
+    private static string Preview(string sql)
+    {
+        var one = sql.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        return one.Length <= 220 ? one : one[..217] + "…";
+    }
+
+    private void Close() => MudDialog.Close();
+
+    public void Dispose() => Snippets.Changed -= OnChanged;
+}

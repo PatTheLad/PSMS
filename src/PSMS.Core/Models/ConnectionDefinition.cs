@@ -14,4 +14,6 @@ public sealed class ConnectionDefinition
     public bool Encrypt { get; set; } = true;
     public bool TrustServerCertificate { get; set; } = true;
     public int? Port { get; set; }
+    /// <summary>Optional accent color (CSS hex, e.g. #3b9eff) for tabs and status bar.</summary>
+    public string? Color { get; set; }
 }

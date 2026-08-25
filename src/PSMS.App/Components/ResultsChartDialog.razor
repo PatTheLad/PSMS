@@ -1,0 +1,160 @@
+@using System.Globalization
+@using PSMS.Core.Models
+
+<MudDialog Class="psms-chart-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Results chart</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_labels.Length == 0 || _series.Count == 0)
+        {
+            <div class="psms-empty">Need a category column and at least one numeric column (first @MaxPoints rows).</div>
+        }
+        else
+        {
+            <div class="psms-chart-tools">
+                <MudSelect T="int" Value="_labelCol" Label="Category" Dense="true" Margin="Margin.Dense" Style="max-width:180px"
+                           ValueChanged="OnLabelChanged">
+                    @for (var i = 0; i < Columns.Count; i++)
+                    {
+                        <MudSelectItem Value="@i">@Columns[i]</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="int" Value="_valueCol" Label="Value" Dense="true" Margin="Margin.Dense" Style="max-width:180px"
+                           ValueChanged="OnValueChanged">
+                    @foreach (var i in _numericCols)
+                    {
+                        <MudSelectItem Value="@i">@Columns[i]</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudButtonGroup OverrideStyles="false" Size="Size.Small">
+                    <MudButton Variant="@(_type == ChartType.Bar ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="@(() => SetType(ChartType.Bar))">Bar</MudButton>
+                    <MudButton Variant="@(_type == ChartType.Line ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="@(() => SetType(ChartType.Line))">Line</MudButton>
+                </MudButtonGroup>
+            </div>
+            <MudChart T="double" ChartType="_type" ChartSeries="_series" ChartLabels="_labels" Width="100%" Height="360px" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const int MaxPoints = 40;
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public IReadOnlyList<string> Columns { get; set; } = [];
+    [Parameter] public IReadOnlyList<IReadOnlyList<string?>> Rows { get; set; } = [];
+
+    private ChartType _type = ChartType.Bar;
+    private int _labelCol;
+    private int _valueCol;
+    private List<int> _numericCols = [];
+    private string[] _labels = [];
+    private List<ChartSeries<double>> _series = [];
+
+    protected override void OnInitialized()
+    {
+        _numericCols = [];
+        for (var c = 0; c < Columns.Count; c++)
+        {
+            if (IsMostlyNumeric(c))
+            {
+                _numericCols.Add(c);
+            }
+        }
+
+        _labelCol = 0;
+        for (var c = 0; c < Columns.Count; c++)
+        {
+            if (!_numericCols.Contains(c))
+            {
+                _labelCol = c;
+                break;
+            }
+        }
+
+        _valueCol = _numericCols.Count > 0 ? _numericCols[0] : 0;
+        Rebuild();
+    }
+
+    private Task OnLabelChanged(int v)
+    {
+        _labelCol = v;
+        Rebuild();
+        return Task.CompletedTask;
+    }
+
+    private Task OnValueChanged(int v)
+    {
+        _valueCol = v;
+        Rebuild();
+        return Task.CompletedTask;
+    }
+
+    private void SetType(ChartType type) => _type = type;
+
+    private void Rebuild()
+    {
+        if (Columns.Count == 0 || Rows.Count == 0 || _numericCols.Count == 0)
+        {
+            _labels = [];
+            _series = [];
+            return;
+        }
+
+        var take = Math.Min(Rows.Count, MaxPoints);
+        var labels = new string[take];
+        var data = new double[take];
+        for (var r = 0; r < take; r++)
+        {
+            var row = Rows[r];
+            var label = _labelCol < row.Count ? (row[_labelCol] ?? "NULL") : "";
+            if (label.Length > 24)
+            {
+                label = label[..24] + "…";
+            }
+
+            labels[r] = string.IsNullOrWhiteSpace(label) ? $"#{r + 1}" : label;
+            var raw = _valueCol < row.Count ? row[_valueCol] : null;
+            data[r] = double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var n) ? n : 0;
+        }
+
+        _labels = labels;
+        _series =
+        [
+            new ChartSeries<double>
+            {
+                Name = Columns[_valueCol],
+                Data = data
+            }
+        ];
+    }
+
+    private bool IsMostlyNumeric(int col)
+    {
+        var sample = Math.Min(Rows.Count, 30);
+        var hits = 0;
+        var seen = 0;
+        for (var r = 0; r < sample; r++)
+        {
+            var cell = col < Rows[r].Count ? Rows[r][col] : null;
+            if (cell is null)
+            {
+                continue;
+            }
+
+            seen++;
+            if (double.TryParse(cell, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            {
+                hits++;
+            }
+        }
+
+        return seen > 0 && hits * 2 >= seen;
+    }
+
+    private void Close() => MudDialog.Close();
+}

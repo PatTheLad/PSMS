@@ -20,3 +20,24 @@ public sealed record ColumnInfo(
     bool IsNullable,
     int? MaxLength,
     int OrdinalPosition);
+
+public sealed record IndexInfo(
+    string Name,
+    bool IsUnique,
+    bool IsPrimaryKey,
+    string Type,
+    string Columns);
+
+public sealed record ForeignKeyInfo(
+    string Name,
+    string Columns,
+    string ReferencedSchema,
+    string ReferencedTable,
+    string ReferencedColumns);
+
+public sealed class TableSchemaOverview
+{
+    public required IReadOnlyList<ColumnInfo> Columns { get; init; }
+    public IReadOnlyList<IndexInfo> Indexes { get; init; } = [];
+    public IReadOnlyList<ForeignKeyInfo> ForeignKeys { get; init; } = [];
+}

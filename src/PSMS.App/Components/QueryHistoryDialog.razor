@@ -1,0 +1,129 @@
+@using PSMS.Core.Models
+@using PSMS.Core.Storage
+@inject QueryHistoryStore History
+@inject SnippetStore Snippets
+@inject ActiveSessionService Sessions
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Query history</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="psms-history-tools">
+            <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                          Placeholder="Search SQL, connection, database…" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Class="psms-history-filter" />
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="ClearAsync"
+                       Disabled="@(_entries.Count == 0)">Clear all</MudButton>
+        </div>
+        <div class="psms-history-list">
+            @if (Filtered.Count == 0)
+            {
+                <div class="psms-empty">No history yet. Run a query to start recording.</div>
+            }
+            else
+            {
+                @foreach (var entry in Filtered)
+                {
+                    <div class="psms-history-item psms-snippet-item">
+                        <button type="button" class="psms-snippet-open" @onclick="@(() => OpenAsync(entry))">
+                            <div class="psms-history-meta">
+                                <span class="@(entry.Succeeded ? "ok" : "bad")">@(entry.Succeeded ? "OK" : "ERR")</span>
+                                <span>@entry.ExecutedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</span>
+                                <span>@entry.ConnectionName</span>
+                                <span>@entry.Database</span>
+                                <span>@entry.ElapsedMilliseconds ms</span>
+                                @if (entry.Succeeded)
+                                {
+                                    <span>@entry.RowCount.ToString("N0") rows</span>
+                                }
+                            </div>
+                            <pre class="psms-history-sql">@Preview(entry.Sql)</pre>
+                        </button>
+                        <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small"
+                                       aria-label="Save as snippet" title="Save as snippet"
+                                       OnClick="@(() => SaveSnippetAsync(entry))" />
+                    </div>
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _filter = string.Empty;
+    private List<QueryHistoryEntry> _entries = [];
+
+    private List<QueryHistoryEntry> Filtered =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _entries
+            : _entries.Where(e =>
+                e.Sql.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || e.ConnectionName.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || e.Database.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || (e.Error?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        History.Changed += OnHistoryChanged;
+        await ReloadAsync();
+    }
+
+    private void OnHistoryChanged() => _ = InvokeAsync(ReloadAsync);
+
+    private async Task ReloadAsync()
+    {
+        _entries = (await History.GetAllAsync()).ToList();
+        StateHasChanged();
+    }
+
+    private async Task ClearAsync()
+    {
+        await History.ClearAsync();
+        Snackbar.Add("History cleared.", Severity.Info);
+        await ReloadAsync();
+    }
+
+    private void OpenAsync(QueryHistoryEntry entry)
+    {
+        var conn = Sessions.OpenConnections.FirstOrDefault(c => c.Id == entry.ConnectionId)
+                   ?? Sessions.SelectedConnection;
+        if (conn is null)
+        {
+            Snackbar.Add("Connect to that server first, then reopen history.", Severity.Warning);
+            return;
+        }
+
+        Sessions.OpenQueryTab(conn, entry.Database, entry.Sql, $"History · {entry.ExecutedAt.ToLocalTime():HH:mm}");
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private async Task SaveSnippetAsync(QueryHistoryEntry entry)
+    {
+        var title = $"{entry.ConnectionName} · {entry.Database} · {entry.ExecutedAt.ToLocalTime():HH:mm}";
+        if (title.Length > 60)
+        {
+            title = title[..57] + "…";
+        }
+
+        await Snippets.UpsertAsync(new SavedSnippet { Title = title, Sql = entry.Sql });
+        Snackbar.Add("Saved to snippets.", Severity.Success);
+    }
+
+    private static string Preview(string sql)
+    {
+        var one = sql.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        return one.Length <= 220 ? one : one[..217] + "…";
+    }
+
+    private void Close() => MudDialog.Close();
+
+    public void Dispose() => History.Changed -= OnHistoryChanged;
+}

@@ -56,7 +56,7 @@ public sealed class QueryRunner
             {
                 token.ThrowIfCancellationRequested();
                 messages.Add($"--- Batch {i + 1} of {batches.Count} ---");
-                var batchResult = await provider.ExecuteQueryAsync(connection, password, database, batches[i], 10_000, token)
+                var batchResult = await provider.ExecuteQueryAsync(connection, password, database, batches[i], 5_000, token)
                     .ConfigureAwait(false);
 
                 allSets.AddRange(batchResult.ResultSets);
@@ -92,5 +92,31 @@ public sealed class QueryRunner
             RowsAffected = rowsAffected,
             Error = error
         };
+    }
+
+    /// <summary>SQL Server only: returns SHOWPLAN_ALL rows without executing the query.</summary>
+    public async Task<QueryResult> ExecuteEstimatedPlanAsync(
+        ConnectionDefinition connection,
+        string database,
+        string sql,
+        CancellationToken externalToken = default)
+    {
+        if (connection.Engine != DbEngine.SqlServer)
+        {
+            return new QueryResult
+            {
+                Error = "Estimated execution plan is only available for SQL Server.",
+                Messages = ["Estimated execution plan is only available for SQL Server."]
+            };
+        }
+
+        Cancel();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+        var token = _cts.Token;
+
+        var password = connection.UseWindowsAuth ? null : _store.DecryptPassword(connection);
+        var provider = _factory.GetProvider(connection.Engine);
+        return await provider.ExecuteEstimatedPlanAsync(connection, password, database, sql, token)
+            .ConfigureAwait(false);
     }
 }

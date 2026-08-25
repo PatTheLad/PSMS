@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=PSMS
+GenericName=SQL Management Studio
+Comment=Cross-platform SQL Management Studio
+Exec=dotnet /home/p/repos/PSMS/src/PSMS.App/bin/Debug/net10.0/PSMS.App.dll
+Icon=/home/p/repos/PSMS/src/PSMS.App/bin/Debug/net10.0/appicon.png
+Terminal=false
+Categories=Development;Database;
+StartupWMClass=PSMS
+StartupNotify=true

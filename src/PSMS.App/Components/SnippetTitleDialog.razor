@@ -1,0 +1,47 @@
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_title"
+                      Label="Title"
+                      Immediate="true"
+                      Margin="Margin.Dense"
+                      Variant="Variant.Outlined"
+                      Class="mt-1"
+                      OnKeyDown="OnKey" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok" Disabled="@string.IsNullOrWhiteSpace(_title)">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "Snippet";
+
+    private string _title = string.Empty;
+
+    protected override void OnInitialized() => _title = Title;
+
+    private void OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            Ok();
+        }
+    }
+
+    private void Ok()
+    {
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            Snackbar.Add("Title is required.", Severity.Warning);
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(_title.Trim()));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

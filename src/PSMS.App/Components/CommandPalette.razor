@@ -1,0 +1,286 @@
+@using PSMS.Core.Models
+@using PSMS.Core.Sql
+@using PSMS.Core.Storage
+@inject ActiveSessionService Sessions
+@inject QueryHistoryStore History
+@inject SchemaIntelliSenseService IntelliSense
+@inject EditorRegistry Editors
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@if (_open)
+{
+    <div class="psms-suggest-backdrop" @onclick="Close" @onkeydown="OnBackdropKey"></div>
+    <div class="psms-suggest-panel psms-palette" @onkeydown="OnKey" tabindex="0">
+        <div class="psms-suggest-header">
+            <MudText Typo="Typo.subtitle2">Command palette</MudText>
+            <MudTextField @ref="_filterRef"
+                          @bind-Value="_filter"
+                          @bind-Value:after="OnFilterChanged"
+                          Immediate="true"
+                          Margin="Margin.Dense"
+                          Placeholder="Type a command, table, or past query…"
+                          Class="mt-1"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnKeyDown="OnFilterKey" />
+        </div>
+        <div class="psms-suggest-list">
+            @if (Visible.Count == 0)
+            {
+                <div class="psms-empty">No matches.</div>
+            }
+            else
+            {
+                @for (var i = 0; i < Visible.Count; i++)
+                {
+                    var item = Visible[i];
+                    var idx = i;
+                    <button type="button"
+                            class="psms-suggest-item @(idx == _selected ? "active" : null)"
+                            @onclick="@(() => RunAsync(item))"
+                            @onmouseenter="@(() => _selected = idx)">
+                        <span class="kind">@item.Kind</span>
+                        <span class="name">@item.Label</span>
+                        @if (!string.IsNullOrEmpty(item.Hint))
+                        {
+                            <span class="hint">@item.Hint</span>
+                        }
+                    </button>
+                }
+            }
+        </div>
+        <div class="psms-suggest-footer">
+            <MudText Typo="Typo.caption">Enter run · ↑↓ · Esc</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" OnClick="Close">Close</MudButton>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnRequestExecute { get; set; }
+    [Parameter] public EventCallback OnRequestCancel { get; set; }
+    [Parameter] public EventCallback OnRequestNewQuery { get; set; }
+    [Parameter] public EventCallback OnRequestSave { get; set; }
+    [Parameter] public EventCallback OnRequestOpen { get; set; }
+    [Parameter] public EventCallback OnRequestNewConnection { get; set; }
+    [Parameter] public EventCallback OnRequestSuggest { get; set; }
+    [Parameter] public EventCallback OnRequestAdmin { get; set; }
+    [Parameter] public EventCallback OnRequestRefreshCatalog { get; set; }
+    [Parameter] public EventCallback OnRequestFormatSql { get; set; }
+    [Parameter] public EventCallback OnRequestPinResults { get; set; }
+    [Parameter] public EventCallback OnRequestHistory { get; set; }
+    [Parameter] public EventCallback OnRequestSnippets { get; set; }
+    [Parameter] public EventCallback OnRequestDuplicate { get; set; }
+    [Parameter] public EventCallback OnRequestEstimatedPlan { get; set; }
+    [Parameter] public EventCallback OnRequestCloseTab { get; set; }
+    [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string? Sql, string? Title)> OnOpenQuery { get; set; }
+
+    private bool _open;
+    private string _filter = string.Empty;
+    private int _selected;
+    private List<PaletteItem> _all = [];
+    private List<PaletteItem> Visible { get; set; } = [];
+    private MudTextField<string>? _filterRef;
+    private IReadOnlyList<QueryHistoryEntry> _history = [];
+
+    protected override void OnInitialized()
+    {
+        History.Changed += OnHistoryChanged;
+        _ = WarmHistoryAsync();
+    }
+
+    private void OnHistoryChanged() => _ = WarmHistoryAsync();
+
+    private async Task WarmHistoryAsync()
+    {
+        _history = await History.GetAllAsync();
+        if (_open)
+        {
+            Rebuild();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public async Task OpenAsync()
+    {
+        _filter = string.Empty;
+        _selected = 0;
+        _history = await History.GetAllAsync();
+        Rebuild();
+        _open = true;
+        StateHasChanged();
+        await Task.Yield();
+        if (_filterRef is not null)
+        {
+            await _filterRef.FocusAsync();
+        }
+    }
+
+    public void Close()
+    {
+        _open = false;
+        StateHasChanged();
+    }
+
+    private void OnFilterChanged()
+    {
+        _selected = 0;
+        Rebuild();
+    }
+
+    private void Rebuild()
+    {
+        _all = BuildItems();
+        Visible = string.IsNullOrWhiteSpace(_filter)
+            ? _all.Take(80).ToList()
+            : _all.Where(i => i.Search.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+                .Take(80)
+                .ToList();
+    }
+
+    private List<PaletteItem> BuildItems()
+    {
+        var items = new List<PaletteItem>
+        {
+            Cmd("Execute query", "F5", () => OnRequestExecute.InvokeAsync()),
+            Cmd("Cancel query", "Esc", () => OnRequestCancel.InvokeAsync()),
+            Cmd("New query", "Ctrl+N", () => OnRequestNewQuery.InvokeAsync()),
+            Cmd("Format SQL", "Ctrl+Shift+F", () => OnRequestFormatSql.InvokeAsync()),
+            Cmd("Save script", "Ctrl+S", () => OnRequestSave.InvokeAsync()),
+            Cmd("Open script", "Ctrl+O", () => OnRequestOpen.InvokeAsync()),
+            Cmd("Insert object", "Ctrl+Space", () => OnRequestSuggest.InvokeAsync()),
+            Cmd("New connection", null, () => OnRequestNewConnection.InvokeAsync()),
+            Cmd("Refresh IntelliSense", null, () => OnRequestRefreshCatalog.InvokeAsync()),
+            Cmd("Pin results", null, () => OnRequestPinResults.InvokeAsync()),
+            Cmd("Query history", "Ctrl+H", () => OnRequestHistory.InvokeAsync()),
+            Cmd("Saved snippets", null, () => OnRequestSnippets.InvokeAsync()),
+            Cmd("Duplicate tab", null, () => OnRequestDuplicate.InvokeAsync()),
+            Cmd("Close tab", "Ctrl+W", () => OnRequestCloseTab.InvokeAsync()),
+            Cmd("Estimated plan", "Ctrl+L", () => OnRequestEstimatedPlan.InvokeAsync()),
+            Cmd(Sessions.ShowAdminWorkspace ? "Show queries" : "Open Admin", null, () => OnRequestAdmin.InvokeAsync()),
+        };
+
+        foreach (var h in _history.Take(40))
+        {
+            var preview = OneLine(h.Sql);
+            items.Add(new PaletteItem(
+                "History",
+                preview,
+                $"{h.ConnectionName} · {h.Database} · {h.ElapsedMilliseconds} ms",
+                $"history {h.ConnectionName} {h.Database} {h.Sql}",
+                () => ReopenHistoryAsync(h)));
+        }
+
+        var snap = IntelliSense.Current;
+        if (snap is not null)
+        {
+            foreach (var obj in snap.Objects.Where(o => o.Kind is CatalogObjectKind.Table or CatalogObjectKind.View).Take(200))
+            {
+                var label = string.IsNullOrEmpty(obj.Schema) ? obj.Name : $"{obj.Schema}.{obj.Name}";
+                items.Add(new PaletteItem(
+                    obj.Kind.ToString(),
+                    label,
+                    "Select Top 1000",
+                    $"{obj.Kind} {label} {obj.Database}",
+                    () => OpenSelectTopAsync(snap, obj)));
+            }
+        }
+
+        return items;
+    }
+
+    private PaletteItem Cmd(string label, string? hint, Func<Task> action) =>
+        new("Command", label, hint, $"cmd {label}", async () =>
+        {
+            Close();
+            await action();
+        });
+
+    private async Task ReopenHistoryAsync(QueryHistoryEntry h)
+    {
+        Close();
+        var conn = Sessions.OpenConnections.FirstOrDefault(c => c.Id == h.ConnectionId)
+                   ?? Sessions.SelectedConnection;
+        if (conn is null)
+        {
+            Snackbar.Add("Reconnect that connection first.", Severity.Warning);
+            return;
+        }
+
+        await OnOpenQuery.InvokeAsync((conn, h.Database, h.Sql, $"History · {h.ExecutedAt.LocalDateTime:HH:mm}"));
+    }
+
+    private async Task OpenSelectTopAsync(IntelliSenseSnapshot snap, CatalogObjectInfo obj)
+    {
+        Close();
+        var conn = Sessions.OpenConnections.FirstOrDefault(c => c.Id == snap.ConnectionId)
+                   ?? Sessions.SelectedConnection;
+        if (conn is null)
+        {
+            Snackbar.Add("Connect first.", Severity.Warning);
+            return;
+        }
+
+        var schema = string.IsNullOrEmpty(obj.Schema) ? "dbo" : obj.Schema;
+        var db = string.IsNullOrEmpty(obj.Database) ? snap.Database : obj.Database;
+        var sql = $"SELECT TOP (1000) *{System.Environment.NewLine}FROM [{schema}].[{obj.Name}];";
+        await OnOpenQuery.InvokeAsync((conn, db, sql, $"{schema}.{obj.Name}"));
+    }
+
+    private async Task OnFilterKey(KeyboardEventArgs e) => await OnKey(e);
+
+    private Task OnBackdropKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            Close();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            Close();
+            return;
+        }
+
+        if (e.Key == "ArrowDown")
+        {
+            _selected = Math.Min(_selected + 1, Math.Max(Visible.Count - 1, 0));
+            StateHasChanged();
+            return;
+        }
+
+        if (e.Key == "ArrowUp")
+        {
+            _selected = Math.Max(_selected - 1, 0);
+            StateHasChanged();
+            return;
+        }
+
+        if (e.Key == "Enter" && Visible.Count > 0)
+        {
+            await RunAsync(Visible[Math.Clamp(_selected, 0, Visible.Count - 1)]);
+        }
+    }
+
+    private async Task RunAsync(PaletteItem item)
+    {
+        await item.Action();
+    }
+
+    private static string OneLine(string sql)
+    {
+        var line = sql.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return line.Length > 90 ? line[..90] + "…" : line;
+    }
+
+    public void Dispose() => History.Changed -= OnHistoryChanged;
+
+    private sealed record PaletteItem(string Kind, string Label, string? Hint, string Search, Func<Task> Action);
+}

@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using PSMS.Core.Abstractions;
 using PSMS.Core.Models;
+using PSMS.Core.Sql;
 
 namespace PSMS.Providers.Sqlite;
 
@@ -85,6 +86,18 @@ public sealed class SqliteProvider : IDbProvider
 
     public Task<IReadOnlyList<FunctionInfo>> GetFunctionsAsync(ConnectionDefinition connection, string? password, string database, string schema, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<FunctionInfo>>([]);
+
+    public async Task<TableSchemaOverview> GetTableSchemaOverviewAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string schema,
+        string table,
+        CancellationToken cancellationToken = default)
+    {
+        var columns = await GetColumnsAsync(connection, password, database, schema, table, cancellationToken).ConfigureAwait(false);
+        return new TableSchemaOverview { Columns = columns };
+    }
 
     public async Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(ConnectionDefinition connection, string? password, string database, string schema, string table, CancellationToken cancellationToken = default)
     {
@@ -222,6 +235,7 @@ public sealed class SqliteProvider : IDbProvider
                 }
 
                 var rows = new List<IReadOnlyList<object?>>();
+                var displayRows = new List<IReadOnlyList<string?>>();
                 var truncated = false;
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -234,18 +248,23 @@ public sealed class SqliteProvider : IDbProvider
                     var row = new object?[reader.FieldCount];
                     for (var i = 0; i < reader.FieldCount; i++)
                     {
-                        row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[i] = ResultMaterializer.ReadCell(reader, i);
                     }
 
                     rows.Add(row);
+                    displayRows.Add(ResultMaterializer.FormatRow(row));
                 }
 
                 if (truncated)
                 {
-                    messages.Add($"Result set {resultSets.Count + 1}: truncated at {maxRows:N0} rows.");
-                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    messages.Add($"Result set {resultSets.Count + 1}: truncated at {maxRows:N0} rows (remaining rows not fetched).");
+                    try
                     {
-                        // drain remaining rows
+                        command.Cancel();
+                    }
+                    catch
+                    {
+                        // ignored
                     }
                 }
 
@@ -253,8 +272,14 @@ public sealed class SqliteProvider : IDbProvider
                 {
                     Columns = columns,
                     Rows = rows,
+                    DisplayRows = displayRows,
                     Truncated = truncated
                 });
+
+                if (truncated)
+                {
+                    break;
+                }
             }
             while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
 
@@ -302,6 +327,18 @@ public sealed class SqliteProvider : IDbProvider
             };
         }
     }
+
+    public Task<QueryResult> ExecuteEstimatedPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new QueryResult
+        {
+            Error = "Estimated execution plan is only available for SQL Server.",
+            Messages = ["Estimated execution plan is only available for SQL Server."]
+        });
 
     private static async Task<IReadOnlyList<ColumnInfo>> ReadTableInfoAsync(SqliteConnection db, string table, CancellationToken cancellationToken)
     {

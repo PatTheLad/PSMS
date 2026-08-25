@@ -12,6 +12,7 @@ public interface IFileDialogService
     Task<string?> OpenSqlFileAsync();
     Task<string?> SaveSqlFileAsync(string? defaultFileName = null);
     Task<string?> SaveCsvFileAsync(string? defaultFileName = null);
+    Task<string?> SaveJsonFileAsync(string? defaultFileName = null);
 }
 
 public sealed class PhotinoFileDialogService : IFileDialogService
@@ -83,5 +84,26 @@ public sealed class PhotinoFileDialogService : IFileDialogService
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments),
             filters,
             defaultFileName ?? "results.csv");
+    }
+
+    public async Task<string?> SaveJsonFileAsync(string? defaultFileName = null)
+    {
+        var window = _host.Window;
+        if (window is null)
+        {
+            return null;
+        }
+
+        var filters = new (string, string[])[]
+        {
+            ("JSON files", ["json"]),
+            ("All files", ["*"])
+        };
+
+        return await window.ShowSaveFileAsync(
+            "Export results",
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments),
+            filters,
+            defaultFileName ?? "results.json");
     }
 }

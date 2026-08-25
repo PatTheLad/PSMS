@@ -8,6 +8,8 @@
 @inject ContextMenuService Menus
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject UiLayoutStore LayoutStore
+@using PSMS.Core.Storage
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -16,78 +18,135 @@
 <MudDialogProvider />
 <MudSnackbarProvider />
 
-<div class="psms-shell" @onkeydown="OnKeyDown" tabindex="0" style="@ShellStyle" @onclick="Menus.Close">
-    <MudAppBar Elevation="0" Dense="true" Class="psms-toolbar" Gutters="true">
-        <MudText Typo="Typo.subtitle1" Style="font-weight:600;letter-spacing:0.04em;color:var(--psms-accent)" Class="mr-3">PSMS</MudText>
+<ErrorBoundary @ref="_errorBoundary">
+    <ChildContent>
+<div class="psms-root" @onkeydown="OnKeyDown" tabindex="0" @onclick="Menus.Close">
+    <div class="psms-shell">
+        <MudAppBar Elevation="0" Dense="true" Fixed="false" Class="psms-toolbar" Gutters="true">
+            <MudText Typo="Typo.subtitle1" Class="psms-brand">PSMS</MudText>
 
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudButton>
-        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save</MudButton>
-        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
-        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
-                   Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                   Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
-        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
-        <MudButton Variant="@(Sessions.ShowAdminWorkspace ? Variant.Filled : Variant.Text)"
-                   Size="Size.Small" Color="Color.Secondary"
-                   StartIcon="@Icons.Material.Filled.AdminPanelSettings"
-                   OnClick="ToggleAdmin">Admin</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="FormatSqlAsync">Format</MudButton>
+            <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                       Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AccountTree"
+                       Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Est. plan</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                       Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy"
+                       OnClick="DuplicateTab">Duplicate</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Terminal" OnClick="OpenPaletteAsync">Palette</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.History" OnClick="OpenHistoryAsync">History</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Bookmark" OnClick="OpenSnippetsAsync">Snippets</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+            <MudButton Variant="@(Sessions.ShowAdminWorkspace ? Variant.Filled : Variant.Text)"
+                       Size="Size.Small" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.AdminPanelSettings"
+                       OnClick="ToggleAdmin">Admin</MudButton>
 
-        <MudSpacer />
-        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
-        <MudTooltip Text="Refresh object catalog used by Insert object">
-            <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
-                           OnClick="RefreshIntelliSenseAsync" aria-label="Refresh catalog" />
-        </MudTooltip>
-        <MudText Typo="Typo.caption" Class="ml-2 d-none d-md-inline" Style="opacity:.7">F5 · Ctrl+Space · Right-click</MudText>
-    </MudAppBar>
+            <MudSpacer />
+            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
+            <MudTooltip Text="Refresh object catalog used by Insert object">
+                <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
+                               OnClick="RefreshIntelliSenseAsync" aria-label="Refresh catalog" />
+            </MudTooltip>
+            <MudText Typo="Typo.caption" Class="ml-2 d-none d-md-inline" Style="opacity:.7">F5 · Ctrl+W · Esc cancel · Ctrl+L · Ctrl+Shift+P</MudText>
+        </MudAppBar>
 
-    <div class="psms-body">
-        <aside class="psms-explorer">
-            <ObjectExplorer @ref="_explorer"
-                            OnOpenQuery="HandleOpenQuery"
-                            OnEditConnection="EditConnection"
-                            OnRequestNewConnection="OpenNewConnection" />
-        </aside>
-        <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
-             @onmousedown="StartExplorerDrag"></div>
-        <section class="psms-main @(Sessions.ShowAdminWorkspace ? "psms-main-admin" : null)">
-            @if (Sessions.ShowAdminWorkspace)
-            {
-                <AdminWorkspace />
-            }
-            else
-            {
-                <QueryWorkspace @ref="_workspace" />
-                <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
-                     @onmousedown="StartEditorDrag"></div>
-                <ResultsPane />
-            }
-        </section>
+        <div class="psms-body">
+            <aside class="psms-explorer">
+                <ObjectExplorer @ref="_explorer"
+                                OnOpenQuery="HandleOpenQuery"
+                                OnEditConnection="EditConnection"
+                                OnRequestNewConnection="OpenNewConnection" />
+            </aside>
+            <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
+                 @onmousedown="StartExplorerDrag"></div>
+            <section class="psms-main @(Sessions.ShowAdminWorkspace ? "psms-main-admin" : null)">
+                @if (Sessions.ShowAdminWorkspace)
+                {
+                    <AdminWorkspace />
+                }
+                else
+                {
+                    <QueryWorkspace @ref="_workspace" />
+                    <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
+                         @onmousedown="StartEditorDrag"></div>
+                    <ResultsPane @ref="_results" />
+                }
+            </section>
+        </div>
+
+        <StatusBar />
     </div>
 
-    <StatusBar />
     <AppContextMenu />
     <ObjectSuggestPopup @ref="_suggest" />
+    <CommandPalette @ref="_palette"
+                    OnRequestExecute="ExecuteAsync"
+                    OnRequestCancel="Cancel"
+                    OnRequestNewQuery="NewQueryAsync"
+                    OnRequestSave="SaveSqlAsync"
+                    OnRequestOpen="OpenSqlAsync"
+                    OnRequestNewConnection="OpenNewConnection"
+                    OnRequestSuggest="OpenSuggest"
+                    OnRequestAdmin="ToggleAdmin"
+                    OnRequestRefreshCatalog="RefreshIntelliSenseAsync"
+                    OnRequestFormatSql="FormatSqlAsync"
+                    OnRequestPinResults="PinResults"
+                    OnRequestHistory="OpenHistoryAsync"
+                    OnRequestSnippets="OpenSnippetsAsync"
+                    OnRequestDuplicate="DuplicateTab"
+                    OnRequestEstimatedPlan="EstimatedPlanAsync"
+                    OnRequestCloseTab="CloseActiveTabAsync"
+                    OnOpenQuery="HandleOpenQuery" />
 </div>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <div class="psms-crash">
+            <h2>Something went wrong</h2>
+            <p>@ex.Message</p>
+            <pre>@ex.ToString()</pre>
+            <button type="button" class="psms-crash-btn" @onclick="RecoverUi">Reload UI</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
 
 @code {
     private QueryWorkspace? _workspace;
+    private ResultsPane? _results;
     private ObjectExplorer? _explorer;
     private ObjectSuggestPopup? _suggest;
+    private CommandPalette? _palette;
+    private ErrorBoundary? _errorBoundary;
     private bool _draggingExplorer;
     private bool _draggingEditor;
     private DotNetObjectReference<App>? _dotNetRef;
 
     [Inject] private IJSRuntime Js { get; set; } = default!;
 
-    private string ShellStyle =>
-        $"--explorer-width:{Sessions.ExplorerWidth:0}px;--editor-ratio:{Sessions.EditorRatio * 100:0.##}%";
+    private async Task ApplyLayoutToDomAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync(
+                "psmsLayout.apply",
+                Sessions.ExplorerWidth,
+                Sessions.EditorRatio);
+        }
+        catch
+        {
+            // script may not be ready yet
+        }
+    }
 
     private string EngineLabel
     {
@@ -118,18 +177,18 @@
     {
         PaletteDark = new PaletteDark
         {
-            Primary = "#2dd4bf",
+            Primary = "#3b9eff",
             Secondary = "#38bdf8",
-            Background = "#0f1419",
-            Surface = "#161b22",
-            AppbarBackground = "#161b22",
-            DrawerBackground = "#161b22",
-            TextPrimary = "#e6edf3",
+            Background = "#0b0f14",
+            Surface = "#12181f",
+            AppbarBackground = "#12181f",
+            DrawerBackground = "#12181f",
+            TextPrimary = "#e8eef6",
             TextSecondary = "#8b9bb0",
             ActionDefault = "#8b9bb0",
-            Divider = "#2a3441",
-            LinesDefault = "#2a3441",
-            TableLines = "#2a3441",
+            Divider = "#243041",
+            LinesDefault = "#243041",
+            TableLines = "#243041",
             Error = "#f87171",
             Success = "#34d399",
             Warning = "#fbbf24",
@@ -147,6 +206,23 @@
     protected override void OnInitialized()
     {
         Sessions.Changed += OnSessionsChanged;
+        _ = LoadLayoutAsync();
+    }
+
+    private async Task LoadLayoutAsync()
+    {
+        try
+        {
+            var layout = await LayoutStore.LoadAsync();
+            Sessions.ExplorerWidth = layout.ExplorerWidth;
+            Sessions.EditorRatio = layout.EditorRatio;
+            await ApplyLayoutToDomAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // keep defaults
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -156,34 +232,80 @@
             _dotNetRef = DotNetObjectReference.Create(this);
             // Bind JS to this component's sync context — never call JS from background threads.
             IntelliSenseJs.Bind(Js, InvokeAsync);
-            try
-            {
-                await Js.InvokeVoidAsync("eval", """
-                    window.psmsDrag = {
-                      start(dotnet, mode) {
-                        const move = (e) => dotnet.invokeMethodAsync('OnDrag', mode, e.clientX, e.clientY, window.innerWidth, window.innerHeight);
-                        const up = () => {
-                          window.removeEventListener('mousemove', move);
-                          window.removeEventListener('mouseup', up);
-                          dotnet.invokeMethodAsync('OnDragEnd');
-                        };
-                        window.addEventListener('mousemove', move);
-                        window.addEventListener('mouseup', up);
-                      }
-                    };
-                    """);
-            }
-            catch
-            {
-                // ignored
-            }
+            await ApplyLayoutToDomAsync();
         }
     }
 
     private void OnSessionsChanged() => InvokeAsync(StateHasChanged);
 
+    private void RecoverUi() => _errorBoundary?.Recover();
+
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
+        if ((e.CtrlKey || e.MetaKey) && e.ShiftKey && e.Key.Equals("p", StringComparison.OrdinalIgnoreCase))
+        {
+            await OpenPaletteAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("h", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
+        {
+            await OpenHistoryAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("f", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
+        {
+            try
+            {
+                if (await Js.InvokeAsync<bool>("psmsIsMonacoFocused"))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // fall through to results filter
+            }
+
+            if (_results is not null)
+            {
+                await _results.FocusFilterAsync();
+            }
+
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("w", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
+        {
+            await CloseActiveTabAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("Tab", StringComparison.OrdinalIgnoreCase))
+        {
+            Sessions.CycleTab(e.ShiftKey ? -1 : 1);
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("k", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
+        {
+            await OpenPaletteAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.ShiftKey && e.Key.Equals("f", StringComparison.OrdinalIgnoreCase))
+        {
+            await FormatSqlAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("l", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
+        {
+            await EstimatedPlanAsync();
+            return;
+        }
+
         if (e.Key == "F5" || (e.CtrlKey && (e.Key == "Enter" || e.Code == "Enter")))
         {
             await ExecuteAsync();
@@ -207,10 +329,61 @@
         else if (e.Key == "Escape")
         {
             Menus.Close();
+            if (CanCancel)
+            {
+                Cancel();
+            }
         }
     }
 
     private void OpenSuggest() => _suggest?.Open();
+
+    private Task OpenPaletteAsync() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    private async Task OpenHistoryAsync()
+    {
+        await DialogService.ShowAsync<QueryHistoryDialog>("Query history", new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        });
+    }
+
+    private async Task OpenSnippetsAsync()
+    {
+        await DialogService.ShowAsync<SnippetsDialog>("Saved snippets", new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        });
+    }
+
+    private void DuplicateTab()
+    {
+        if (Sessions.DuplicateActiveTab() is null)
+        {
+            Snackbar.Add("Nothing to duplicate — open a query tab first.", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("Tab duplicated.", Severity.Success);
+        }
+    }
+
+    private async Task FormatSqlAsync()
+    {
+        if (_workspace is not null)
+        {
+            await _workspace.FormatActiveSqlAsync();
+        }
+    }
+
+    private void PinResults()
+    {
+        var pin = Sessions.PinCurrentResult();
+        Snackbar.Add(pin is null ? "Nothing to pin — run a query first." : "Results pinned.",
+            pin is null ? Severity.Warning : Severity.Success);
+    }
 
     private void ToggleAdmin()
     {
@@ -243,26 +416,27 @@
     }
 
     [JSInvokable]
-    public void OnDrag(string mode, double x, double y, double width, double height)
+    public void OnDragEnd(string mode, double explorerWidth, double editorRatio)
     {
         if (mode == "explorer")
         {
-            Sessions.ExplorerWidth = Math.Clamp(x, 220, 480);
+            Sessions.ExplorerWidth = Math.Clamp(explorerWidth, 220, 480);
         }
         else
         {
-            Sessions.EditorRatio = Math.Clamp(y / Math.Max(height - 72, 1), 0.2, 0.8);
+            Sessions.EditorRatio = Math.Clamp(editorRatio, 0.2, 0.8);
         }
 
-        InvokeAsync(StateHasChanged);
-    }
-
-    [JSInvokable]
-    public void OnDragEnd()
-    {
         _draggingExplorer = false;
         _draggingEditor = false;
-        InvokeAsync(StateHasChanged);
+        _ = PersistLayoutAsync();
+    }
+
+    private async Task PersistLayoutAsync()
+    {
+        await ApplyLayoutToDomAsync();
+        await LayoutStore.SaveAsync(Sessions.ExplorerWidth, Sessions.EditorRatio);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task OpenNewConnection()
@@ -341,9 +515,13 @@
         }
         else
         {
-            Snackbar.Add(
-                $"IntelliSense ready — {snap?.Databases.Count:N0} databases, {snap?.TableCount:N0} tables/views.",
-                Severity.Success);
+            var msg = $"IntelliSense ready — {snap?.Databases.Count:N0} databases, {snap?.TableCount:N0} tables/views.";
+            if (IntelliSenseJs.LastPushTruncated)
+            {
+                msg += " (JS catalog capped for stability — current DB prioritized.)";
+            }
+
+            Snackbar.Add(msg, Severity.Success);
         }
     }
 
@@ -371,7 +549,11 @@
         Sessions.Notify();
     }
 
-    private async Task SaveSqlAsync()
+    private async Task SaveSqlAsync() => await PersistSqlAsync(forceNewPath: false);
+
+    private async Task SaveSqlAsAsync() => await PersistSqlAsync(forceNewPath: true);
+
+    private async Task PersistSqlAsync(bool forceNewPath)
     {
         var tab = Sessions.ActiveTab;
         if (tab is null)
@@ -381,10 +563,10 @@
         }
 
         tab.Sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
-        var path = tab.FilePath;
+        var path = forceNewPath ? null : tab.FilePath;
         if (string.IsNullOrWhiteSpace(path))
         {
-            path = await FileDialogs.SaveSqlFileAsync($"{tab.Title}.sql");
+            path = await FileDialogs.SaveSqlFileAsync($"{SanitizeFileName(tab.Title)}.sql");
             if (string.IsNullOrWhiteSpace(path))
             {
                 return;
@@ -400,6 +582,24 @@
         Snackbar.Add($"Saved {path}", Severity.Success);
     }
 
+    private static string SanitizeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(c, '_');
+        }
+
+        return string.IsNullOrWhiteSpace(name) ? "query" : name;
+    }
+
+    private async Task CloseActiveTabAsync()
+    {
+        if (_workspace is not null)
+        {
+            await _workspace.CloseActiveTabAsync();
+        }
+    }
+
     private async Task ExecuteAsync()
     {
         if (_workspace is null)
@@ -409,6 +609,17 @@
         }
 
         await _workspace.ExecuteActiveAsync();
+    }
+
+    private async Task EstimatedPlanAsync()
+    {
+        if (_workspace is null)
+        {
+            Snackbar.Add("Query workspace is not ready.", Severity.Warning);
+            return;
+        }
+
+        await _workspace.ExecuteEstimatedPlanAsync();
     }
 
     private void Cancel() => QueryRunner.Cancel();
@@ -442,7 +653,8 @@
         EncryptedPassword = source.EncryptedPassword,
         Encrypt = source.Encrypt,
         TrustServerCertificate = source.TrustServerCertificate,
-        Port = source.Port
+        Port = source.Port,
+        Color = source.Color
     };
 
     public void Dispose()

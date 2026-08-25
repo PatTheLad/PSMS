@@ -1,0 +1,166 @@
+@using PSMS.Core.Abstractions
+@using PSMS.Core.Models
+@inject IConnectionStore Store
+@inject IDbProviderFactory ProviderFactory
+@inject ISnackbar Snackbar
+
+<MudDialog Class="psms-schema-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@($"{Schema}.{Table}")</MudText>
+        <MudText Typo="Typo.caption" Class="psms-meta">@Database · schema overview</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mb-2" />
+        }
+        else if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="psms-msg-error">@_error</div>
+        }
+        else if (_overview is null)
+        {
+            <div class="psms-empty">No schema details.</div>
+        }
+        else
+        {
+            <MudTabs Elevation="0" Class="psms-schema-tabs">
+                <MudTabPanel Text="@($"Columns ({_overview.Columns.Count})")">
+                    <div class="psms-schema-table-host">
+                        <table class="psms-schema-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Null</th>
+                                    <th>Length</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var col in _overview.Columns)
+                                {
+                                    <tr>
+                                        <td>@col.OrdinalPosition</td>
+                                        <td class="mono">@col.Name</td>
+                                        <td class="mono">@col.DataType</td>
+                                        <td>@(col.IsNullable ? "YES" : "NO")</td>
+                                        <td>@(col.MaxLength?.ToString() ?? "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </MudTabPanel>
+                <MudTabPanel Text="@($"Indexes ({_overview.Indexes.Count})")">
+                    @if (_overview.Indexes.Count == 0)
+                    {
+                        <div class="psms-empty" style="padding:0.75rem">No indexes (or engine does not expose them).</div>
+                    }
+                    else
+                    {
+                        <div class="psms-schema-table-host">
+                            <table class="psms-schema-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Type</th>
+                                        <th>Keys</th>
+                                        <th>Columns</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var ix in _overview.Indexes)
+                                    {
+                                        <tr>
+                                            <td class="mono">@ix.Name</td>
+                                            <td>@ix.Type</td>
+                                            <td>
+                                                @if (ix.IsPrimaryKey)
+                                                {
+                                                    <span class="psms-trunc-badge">PK</span>
+                                                }
+                                                @if (ix.IsUnique)
+                                                {
+                                                    <span class="psms-trunc-badge">UQ</span>
+                                                }
+                                            </td>
+                                            <td class="mono">@ix.Columns</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </MudTabPanel>
+                <MudTabPanel Text="@($"Foreign keys ({_overview.ForeignKeys.Count})")">
+                    @if (_overview.ForeignKeys.Count == 0)
+                    {
+                        <div class="psms-empty" style="padding:0.75rem">No foreign keys.</div>
+                    }
+                    else
+                    {
+                        <div class="psms-schema-table-host">
+                            <table class="psms-schema-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Columns</th>
+                                        <th>References</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var fk in _overview.ForeignKeys)
+                                    {
+                                        <tr>
+                                            <td class="mono">@fk.Name</td>
+                                            <td class="mono">@fk.Columns</td>
+                                            <td class="mono">@($"{fk.ReferencedSchema}.{fk.ReferencedTable} ({fk.ReferencedColumns})")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ConnectionDefinition Connection { get; set; } = default!;
+    [Parameter] public string Database { get; set; } = "";
+    [Parameter] public string Schema { get; set; } = "";
+    [Parameter] public string Table { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private TableSchemaOverview? _overview;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var provider = ProviderFactory.GetProvider(Connection.Engine);
+            _overview = await provider.GetTableSchemaOverviewAsync(Connection, password, Database, Schema, Table);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Close() => MudDialog.Close();
+}

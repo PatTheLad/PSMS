@@ -10,6 +10,14 @@ namespace PSMS.App.Services;
 /// </summary>
 public sealed class IntelliSenseJsBridge : IDisposable
 {
+    /// <summary>Hard cap so Photino WebView doesn't OOM on huge servers.</summary>
+    private const int MaxObjectsForJs = 4_000;
+    private const int MaxColumnsForJs = 8_000;
+    private const int MaxDatabasesForJs = 150;
+
+    /// <summary>True after the last push if the in-memory catalog was truncated for JS.</summary>
+    public bool LastPushTruncated { get; private set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -106,27 +114,51 @@ public sealed class IntelliSenseJsBridge : IDisposable
                 return;
             }
 
-            // Full catalogs — no caps. Serialize to JSON once for reliable large payloads.
+            var currentDb = snap.Database;
+            var objects = snap.Objects
+                .OrderBy(o =>
+                {
+                    var same = string.Equals(o.Database ?? currentDb, currentDb, StringComparison.OrdinalIgnoreCase);
+                    return same ? 0 : 1;
+                })
+                .ThenBy(o => o.Kind)
+                .ThenBy(o => o.Schema, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxObjectsForJs)
+                .Select(o => new
+                {
+                    s = o.Schema,
+                    n = o.Name,
+                    k = KindCode(o.Kind),
+                    d = string.Equals(o.Database ?? currentDb, currentDb, StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : (o.Database ?? currentDb)
+                })
+                .ToList();
+
+            var columns = snap.ColumnsByTable
+                .SelectMany(kv => kv.Value)
+                .Take(MaxColumnsForJs)
+                .Select(c => new
+                {
+                    s = c.Schema,
+                    t = c.Table,
+                    n = c.Name,
+                    ty = c.DataType
+                })
+                .ToList();
+
+            LastPushTruncated = snap.Objects.Count > MaxObjectsForJs
+                                || snap.ColumnsByTable.Sum(kv => kv.Value.Count) > MaxColumnsForJs
+                                || snap.Databases.Count > MaxDatabasesForJs;
+
             var payload = new
             {
-                currentDatabase = snap.Database,
-                databases = snap.Databases.ToList(),
-                objects = snap.Objects.Select(o => new
-                {
-                    schema = o.Schema,
-                    name = o.Name,
-                    kind = o.Kind.ToString(),
-                    database = o.Database ?? snap.Database
-                }).ToList(),
-                columns = snap.ColumnsByTable
-                    .SelectMany(kv => kv.Value)
-                    .Select(c => new
-                    {
-                        schema = c.Schema,
-                        table = c.Table,
-                        name = c.Name,
-                        dataType = c.DataType
-                    }).ToList()
+                currentDatabase = currentDb,
+                databases = snap.Databases.Take(MaxDatabasesForJs).ToList(),
+                objects,
+                columns,
+                truncated = LastPushTruncated
             };
 
             var json = JsonSerializer.Serialize(payload, JsonOptions);
@@ -143,6 +175,17 @@ public sealed class IntelliSenseJsBridge : IDisposable
             // Monaco / script may not be ready; editor init will retry.
         }
     }
+
+    private static string KindCode(CatalogObjectKind kind) => kind switch
+    {
+        CatalogObjectKind.Schema => "S",
+        CatalogObjectKind.Table => "T",
+        CatalogObjectKind.View => "V",
+        CatalogObjectKind.Procedure => "P",
+        CatalogObjectKind.Function => "F",
+        CatalogObjectKind.Column => "C",
+        _ => "T"
+    };
 
     public void Dispose()
     {

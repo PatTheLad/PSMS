@@ -60,6 +60,36 @@ window.psmsIntelliSense = (function () {
     });
   }
 
+  function expandKind(code) {
+    switch (code) {
+      case "S": case "Schema": return "Schema";
+      case "T": case "Table": return "Table";
+      case "V": case "View": return "View";
+      case "P": case "Procedure": return "Procedure";
+      case "F": case "Function": return "Function";
+      case "C": case "Column": return "Column";
+      default: return code || "Table";
+    }
+  }
+
+  function normalizeObject(o) {
+    return {
+      schema: o.schema != null ? o.schema : (o.s || ""),
+      name: o.name != null ? o.name : (o.n || ""),
+      kind: expandKind(o.kind != null ? o.kind : o.k),
+      database: o.database != null ? o.database : (o.d || null)
+    };
+  }
+
+  function normalizeColumn(c) {
+    return {
+      schema: c.schema != null ? c.schema : (c.s || ""),
+      table: c.table != null ? c.table : (c.t || ""),
+      name: c.name != null ? c.name : (c.n || ""),
+      dataType: c.dataType != null ? c.dataType : (c.ty || "")
+    };
+  }
+
   function setCatalog(payload) {
     if (!payload) {
       state.currentDatabase = "";
@@ -69,8 +99,8 @@ window.psmsIntelliSense = (function () {
     } else {
       state.currentDatabase = payload.currentDatabase || "";
       state.databases = Array.isArray(payload.databases) ? payload.databases : [];
-      state.objects = Array.isArray(payload.objects) ? payload.objects : [];
-      state.columns = Array.isArray(payload.columns) ? payload.columns : [];
+      state.objects = Array.isArray(payload.objects) ? payload.objects.map(normalizeObject) : [];
+      state.columns = Array.isArray(payload.columns) ? payload.columns.map(normalizeColumn) : [];
     }
     rebuildLookup();
     refreshAllHighlights();

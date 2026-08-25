@@ -8,6 +8,21 @@
     <DialogContent>
         <MudStack Spacing="2">
             <MudTextField @bind-Value="_model.Name" Label="Connection name" Required="true" />
+            <div class="psms-color-picker">
+                <MudText Typo="Typo.caption" Class="mb-1">Connection color</MudText>
+                <div class="psms-color-swatches">
+                    <button type="button" class="psms-color-swatch none @(_model.Color is null ? "active" : null)"
+                            title="None" @onclick="@(() => _model.Color = null)"></button>
+                    @foreach (var hex in PresetColors)
+                    {
+                        <button type="button"
+                                class="psms-color-swatch @(string.Equals(_model.Color, hex, StringComparison.OrdinalIgnoreCase) ? "active" : null)"
+                                style="@($"background:{hex}")"
+                                title="@hex"
+                                @onclick="@(() => _model.Color = hex)"></button>
+                    }
+                </div>
+            </div>
             <MudSelect T="DbEngine" @bind-Value="_model.Engine" Label="Engine" Dense="true">
                 <MudSelectItem Value="DbEngine.SqlServer">SQL Server</MudSelectItem>
                 <MudSelectItem Value="DbEngine.Sqlite">SQLite</MudSelectItem>
@@ -56,6 +71,12 @@
 
     [Parameter] public ConnectionDefinition Connection { get; set; } = new();
 
+    private static readonly string[] PresetColors =
+    [
+        "#3b9eff", "#ef4444", "#f59e0b", "#22c55e",
+        "#a855f7", "#ec4899", "#14b8a6", "#94a3b8"
+    ];
+
     private ConnectionDefinition _model = new();
     private string? _password;
     private bool _busy;
@@ -78,7 +99,8 @@
             EncryptedPassword = Connection.EncryptedPassword,
             Encrypt = Connection.Encrypt,
             TrustServerCertificate = Connection.TrustServerCertificate,
-            Port = Connection.Port
+            Port = Connection.Port,
+            Color = Connection.Color
         };
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

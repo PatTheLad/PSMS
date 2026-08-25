@@ -1,10 +1,14 @@
+@using PSMS.Core.Models
+@using PSMS.Core.Storage
 @inject ActiveSessionService Sessions
 @inject QueryRunner QueryRunner
 @inject IConnectionStore Store
 @inject IDbProviderFactory ProviderFactory
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject EditorRegistry Editors
 @inject SchemaIntelliSenseService IntelliSense
+@inject QueryHistoryStore History
 @implements IDisposable
 
 <div class="psms-editor-pane">
@@ -17,8 +21,8 @@
     else
     {
         <div class="psms-tab-tools">
-            <MudText Typo="Typo.caption" Class="mr-2">Database</MudText>
-            <MudSelect T="string" Dense="true" Margin="Margin.Dense" Style="max-width:220px"
+            <MudText Typo="Typo.caption" Class="mr-2 psms-toolbar-label">Database</MudText>
+            <MudSelect T="string" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:220px"
                        Value="Sessions.ActiveTab?.Database"
                        ValueChanged="OnDatabaseChanged"
                        Disabled="@(Sessions.ActiveTab is null)">
@@ -31,18 +35,34 @@
                 <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small"
                                OnClick="RefreshIntelliSenseAsync" aria-label="Refresh IntelliSense" />
             </MudTooltip>
-            <MudText Typo="Typo.caption" Style="opacity:.65">Ctrl+Space</MudText>
+            <MudText Typo="Typo.caption" Class="psms-toolbar-hint">Ctrl+Space</MudText>
             <MudSpacer />
-            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="CloseActive">Close tab</MudButton>
         </div>
 
         <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
                  @bind-ActivePanelIndex="_activeIndex"
+                 Class="psms-query-tabs"
                  Style="flex:1;min-height:0;height:100%">
             @foreach (var tab in Sessions.Tabs)
             {
-                <MudTabPanel Text="@(tab.IsDirty ? tab.Title + " *" : tab.Title)">
-                    <QueryEditorPane @key="tab.Id" Tab="tab" />
+                var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId);
+                var color = connection?.Color;
+                <MudTabPanel>
+                    <TabContent>
+                        <div class="psms-query-tab">
+                            @if (!string.IsNullOrWhiteSpace(color))
+                            {
+                                <span class="psms-tab-color" style="@($"background:{color}")"></span>
+                            }
+                            <span class="psms-query-tab-title" title="@tab.Title">@(tab.IsDirty ? tab.Title + " *" : tab.Title)</span>
+                            <button type="button" class="psms-tab-close" title="Close"
+                                    @onclick="@(() => CloseTabAsync(tab.Id))"
+                                    @onclick:stopPropagation="true">×</button>
+                        </div>
+                    </TabContent>
+                    <ChildContent>
+                        <QueryEditorPane @key="tab.Id" Tab="tab" />
+                    </ChildContent>
                 </MudTabPanel>
             }
         </MudTabs>
@@ -180,15 +200,71 @@
         }
     }
 
-    private void CloseActive()
+    private Task CloseTabAsync(Guid id) => CloseTabInternalAsync(id);
+
+    public Task CloseActiveTabAsync()
     {
-        if (Sessions.ActiveTabId is Guid id)
+        var tab = Sessions.ActiveTab;
+        return tab is null ? Task.CompletedTask : CloseTabInternalAsync(tab.Id);
+    }
+
+    private async Task CloseTabInternalAsync(Guid id)
+    {
+        var tab = Sessions.Tabs.FirstOrDefault(t => t.Id == id);
+        if (tab is null)
         {
-            Sessions.CloseTab(id);
+            return;
         }
+
+        // Sync editor buffer before dirty check.
+        tab.Sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+
+        if (tab.IsDirty)
+        {
+            var choice = await DialogService.ShowMessageBoxAsync(
+                "Unsaved changes",
+                $"'{tab.Title}' has unsaved changes. Close anyway?",
+                yesText: "Discard",
+                cancelText: "Keep open");
+
+            if (choice != true)
+            {
+                return;
+            }
+        }
+
+        Sessions.CloseTab(id);
+    }
+
+    public async Task FormatActiveSqlAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Snackbar.Add("Open a query tab first.", Severity.Warning);
+            return;
+        }
+
+        var sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+        var formatted = PSMS.Core.Sql.SqlFormatter.Format(sql);
+        tab.Sql = formatted;
+        tab.IsDirty = true;
+        await Editors.SetSqlAsync(tab.Id, formatted);
+        Sessions.Notify();
+        Snackbar.Add("SQL formatted.", Severity.Info);
     }
 
     public async Task ExecuteActiveAsync()
+    {
+        await RunAsync(estimatedPlan: false);
+    }
+
+    public async Task ExecuteEstimatedPlanAsync()
+    {
+        await RunAsync(estimatedPlan: true);
+    }
+
+    private async Task RunAsync(bool estimatedPlan)
     {
         var tab = Sessions.ActiveTab;
         if (tab is null)
@@ -216,24 +292,64 @@
         }
 
         tab.IsExecuting = true;
+        Sessions.ViewLiveResults();
         Sessions.Notify();
 
         try
         {
-            tab.LastResult = await QueryRunner.ExecuteAsync(connection, tab.Database, sql);
+            tab.LastResult = estimatedPlan
+                ? await QueryRunner.ExecuteEstimatedPlanAsync(connection, tab.Database, sql)
+                : await QueryRunner.ExecuteAsync(connection, tab.Database, sql);
+
+            if (!estimatedPlan)
+            {
+                await History.AddAsync(new QueryHistoryEntry
+                {
+                    Sql = sql,
+                    ConnectionId = connection.Id,
+                    ConnectionName = connection.Name,
+                    Database = tab.Database,
+                    ElapsedMilliseconds = tab.LastResult.ElapsedMilliseconds,
+                    Succeeded = string.IsNullOrEmpty(tab.LastResult.Error),
+                    RowCount = tab.LastResult.ResultSets.Sum(r => r.Rows.Count),
+                    Error = tab.LastResult.Error
+                });
+            }
+
             if (!string.IsNullOrEmpty(tab.LastResult.Error) && tab.LastResult.Error != "Cancelled")
             {
                 Snackbar.Add(tab.LastResult.Error, Severity.Error);
             }
+            else if (tab.LastResult.Error == "Cancelled")
+            {
+                Snackbar.Add("Query cancelled.", Severity.Info);
+            }
             else if (string.IsNullOrEmpty(tab.LastResult.Error))
             {
                 var rows = tab.LastResult.ResultSets.Sum(r => r.Rows.Count);
-                Snackbar.Add($"Query completed — {rows:N0} row(s).", Severity.Success);
+                Snackbar.Add(
+                    estimatedPlan
+                        ? $"Estimated plan — {rows:N0} plan row(s)."
+                        : $"Query completed — {rows:N0} row(s).",
+                    Severity.Success);
             }
         }
         catch (Exception ex)
         {
             tab.LastResult = new QueryResult { Error = ex.Message, Messages = [ex.Message] };
+            if (!estimatedPlan)
+            {
+                await History.AddAsync(new QueryHistoryEntry
+                {
+                    Sql = sql,
+                    ConnectionId = connection.Id,
+                    ConnectionName = connection.Name,
+                    Database = tab.Database,
+                    Succeeded = false,
+                    Error = ex.Message
+                });
+            }
+
             Snackbar.Add(ex.Message, Severity.Error);
         }
         finally

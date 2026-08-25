@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>PSMS.App</RootNamespace>
-    <ApplicationIcon />
+    <ApplicationIcon>wwwroot\favicon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,6 +26,15 @@
     <Content Update="wwwroot\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <EmbeddedResource Include="wwwroot\appicon.png" LogicalName="PSMS.App.wwwroot.appicon.png" />
+    <EmbeddedResource Include="wwwroot\favicon.ico" LogicalName="PSMS.App.wwwroot.favicon.ico" />
   </ItemGroup>
+
+  <!-- Photino looks for icons next to the executable on Linux/KDE -->
+  <Target Name="CopyWindowIcons" AfterTargets="Build">
+    <Copy SourceFiles="wwwroot\appicon.png;wwwroot\favicon.ico"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

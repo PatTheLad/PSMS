@@ -1,0 +1,100 @@
+@using System.Text.Json
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="psms-cell-viewer-tools">
+            <MudButtonGroup OverrideStyles="false" Size="Size.Small">
+                <MudButton Variant="@(!_jsonMode ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="ShowText">Text</MudButton>
+                <MudButton Variant="@(_jsonMode ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="TryJson" Disabled="@(!_canJson)">JSON</MudButton>
+            </MudButtonGroup>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync">Copy</MudButton>
+        </div>
+        <pre class="psms-cell-viewer-body">@_display</pre>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string ColumnName { get; set; } = "Value";
+    [Parameter] public string? Value { get; set; }
+
+    private string Title => string.IsNullOrWhiteSpace(ColumnName) ? "Cell" : ColumnName;
+    private bool _jsonMode;
+    private bool _canJson;
+    private string? _prettyJson;
+    private string _display = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _display = Value ?? "NULL";
+        _canJson = TryParseJson(Value, out _prettyJson);
+    }
+
+    private void TryJson()
+    {
+        if (!_canJson || _prettyJson is null)
+        {
+            return;
+        }
+
+        _jsonMode = true;
+        _display = _prettyJson;
+    }
+
+    private void ShowText()
+    {
+        _jsonMode = false;
+        _display = Value ?? "NULL";
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", _display);
+            Snackbar.Add("Copied.", Severity.Info);
+        }
+        catch
+        {
+            Snackbar.Add("Clipboard copy failed.", Severity.Warning);
+        }
+    }
+
+    private void Close() => MudDialog.Close();
+
+    private static bool TryParseJson(string? value, out string? pretty)
+    {
+        pretty = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var t = value.Trim();
+        if (!(t.StartsWith('{') || t.StartsWith('[')))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(t);
+            pretty = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

@@ -1,137 +1,1012 @@
 @using System.Globalization
 @using System.Text
+@using PSMS.Core.Models
+@using PSMS.Core.Sql
 @inject ActiveSessionService Sessions
 @inject IFileDialogService FileDialogs
 @inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject IDialogService Dialogs
 @implements IDisposable
 
-<div class="psms-results-pane">
-    @if (Sessions.ActiveTab?.LastResult is null)
+<div class="psms-results-pane" tabindex="0" @onkeydown="OnKeyDown">
+    @{
+        var result = DisplayResult;
+        var viewingPin = Sessions.ViewingPinned;
+    }
+    @if (result is null)
     {
-        <div class="psms-empty">Results appear here after you execute a query (F5).</div>
+        <div class="psms-empty psms-empty-results">
+            <div class="psms-empty-title">Results</div>
+            <div>Execute a query with <kbd>F5</kbd> or the Execute button.</div>
+        </div>
     }
     else
     {
-        var result = Sessions.ActiveTab.LastResult;
-        <div class="psms-tab-tools">
+        <div class="psms-tab-tools psms-results-tools">
+            <MudTextField @ref="_filterField"
+                          @bind-Value="_filter"
+                          @bind-Value:after="OnFilterChanged"
+                          Immediate="true"
+                          Margin="Margin.Dense"
+                          Variant="Variant.Outlined"
+                          Placeholder="Filter… (Ctrl+F)"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Class="psms-results-filter"
+                          Disabled="@(!result.HasResultSet)" />
+            <MudButton Size="Size.Small" Variant="@(_textMode ? Variant.Filled : Variant.Text)"
+                       StartIcon="@Icons.Material.Filled.Notes"
+                       Disabled="@(!result.HasResultSet)" OnClick="ToggleTextMode">Text</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DataObject"
+                       Disabled="@(!result.HasResultSet)" OnClick="CopyInsertAsync">INSERT</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PushPin"
+                       Disabled="@(!result.HasResultSet || viewingPin is not null)" OnClick="PinAsync">Pin</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.BarChart"
+                       Disabled="@(!result.HasResultSet)" OnClick="OpenChartAsync">Chart</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download"
-                       Disabled="@(!result.HasResultSet)" OnClick="ExportCsvAsync">Export CSV</MudButton>
+                       Disabled="@(!result.HasResultSet)" OnClick="ExportCsvAsync">CSV</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Code"
+                       Disabled="@(!result.HasResultSet)" OnClick="ExportJsonAsync">JSON</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.TableChart"
+                       Disabled="@(!result.HasResultSet)" OnClick="CopyMarkdownAsync">MD</MudButton>
             <MudSpacer />
-            <MudText Typo="Typo.caption">@result.ElapsedMilliseconds ms</MudText>
+            @if (viewingPin is not null)
+            {
+                <span class="psms-trunc-badge">Pinned</span>
+            }
+            @if (result.ResultSets.Any(s => s.Truncated))
+            {
+                <span class="psms-trunc-badge">Truncated</span>
+            }
+            <span class="psms-meta">@VisibleRowLabel(result)</span>
+            <span class="psms-meta">@result.ElapsedMilliseconds ms</span>
         </div>
 
-        <MudTabs Elevation="0" Style="flex:1;min-height:0;height:100%">
-            @{
-                var setIndex = 0;
-            }
-            @foreach (var set in result.ResultSets)
-            {
-                var localIndex = setIndex++;
-                <MudTabPanel Text="@($"Results {localIndex + 1} ({set.Rows.Count})")">
-                    @if (set.Truncated)
-                    {
-                        <MudAlert Severity="Severity.Warning" Dense="true" Class="ma-1">Result truncated.</MudAlert>
-                    }
-                    <div style="flex:1;min-height:0;overflow:auto;height:100%">
-                        <MudSimpleTable Dense="true" Hover="true" Style="width:max-content;min-width:100%">
-                            <thead>
-                            <tr>
-                                @foreach (var col in set.Columns)
-                                {
-                                    <th>@col</th>
-                                }
-                            </tr>
-                            </thead>
-                            <tbody>
-                            @foreach (var row in set.Rows)
-                            {
-                                <tr>
-                                    @foreach (var cell in row)
-                                    {
-                                        <td>
-                                            @if (cell is null)
-                                            {
-                                                <span class="psms-null">NULL</span>
-                                            }
-                                            else
-                                            {
-                                                @FormatCell(cell)
-                                            }
-                                        </td>
-                                    }
-                                </tr>
-                            }
-                            </tbody>
-                        </MudSimpleTable>
-                    </div>
-                </MudTabPanel>
-            }
+        @if (Sessions.PinnedResults.Count > 0)
+        {
+            <div class="psms-pin-strip">
+                <button type="button" class="psms-pin-chip @(viewingPin is null ? "active" : null)"
+                        @onclick="Sessions.ViewLiveResults">Live</button>
+                @foreach (var pin in Sessions.PinnedResults)
+                {
+                    <button type="button" class="psms-pin-chip @(Sessions.ViewingPinnedId == pin.Id ? "active" : null)"
+                            @onclick="@(() => Sessions.ViewPinned(pin.Id))"
+                            title="@pin.Title">
+                        @pin.Title
+                        <span class="psms-pin-x" @onclick="@(() => Sessions.Unpin(pin.Id))" @onclick:stopPropagation="true">×</span>
+                    </button>
+                }
+            </div>
+        }
 
-            <MudTabPanel Text="Messages">
-                <div class="psms-messages">
-                    @foreach (var message in result.Messages)
-                    {
-                        <div>@message</div>
+        <div class="psms-results-main @(_selectedRow is not null ? "has-detail" : null)">
+            <div class="psms-results-center">
+                <MudTabs Elevation="0" Class="psms-results-tabs" Style="flex:1;min-height:0;height:100%"
+                         ActivePanelIndex="_activePanel"
+                         ActivePanelIndexChanged="OnPanelChanged">
+                    @{
+                        var setIndex = 0;
                     }
-                    @if (!string.IsNullOrEmpty(result.Error))
+                    @foreach (var set in result.ResultSets)
                     {
-                        <div style="color: var(--psms-danger);">@result.Error</div>
+                        var localIndex = setIndex++;
+                        <MudTabPanel Text="@TabLabel(localIndex, set)">
+                            @if (_activePanel == localIndex)
+                            {
+                                var rows = GetGridRows(set);
+                                <div class="psms-results-grid-host" @key="_gridKey">
+                                    @if (rows.Count == 0)
+                                    {
+                                        <div class="psms-empty" style="padding:0.75rem 1rem">No rows@(string.IsNullOrWhiteSpace(_filter) ? "." : " match this filter.")</div>
+                                    }
+                                    else if (_textMode)
+                                    {
+                                        <div class="psms-results-text">
+                                            <div class="psms-results-text-tools">
+                                                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="CopyTextAsync">Copy all</MudButton>
+                                            </div>
+                                            <pre>@BuildTextView(set, rows)</pre>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="psms-grid-scroll">
+                                            <div class="psms-grid-inner" style="@($"width:{_tableWidth}px")">
+                                                <div class="psms-grid-header">
+                                                    <div class="psms-grid-cell psms-grid-rownum">#</div>
+                                                    @for (var c = 0; c < set.Columns.Count; c++)
+                                                    {
+                                                        var col = c;
+                                                        var w = ColWidth(c);
+                                                        var sorted = _sortCol == col;
+                                                        <div class="psms-grid-th-wrap" data-col="@col" data-w="@w" style="@CellStyle(w)">
+                                                            <button type="button"
+                                                                    class="psms-grid-th @(sorted ? "is-sorted" : null)"
+                                                                    title="@(sorted ? $"Sorted {(_sortAsc ? "ascending" : "descending")} — click to cycle" : $"Sort by {set.Columns[c]}")"
+                                                                    @onclick="@(() => ToggleSort(col))">
+                                                                <span class="psms-grid-th-label">@set.Columns[c]</span>
+                                                                @if (sorted)
+                                                                {
+                                                                    <span class="psms-grid-sort">@(_sortAsc ? "▲" : "▼")</span>
+                                                                }
+                                                            </button>
+                                                            <span class="psms-col-resizer"
+                                                                  title="Drag to resize"
+                                                                  @onmousedown="@(e => StartColResizeAsync(e, col))"
+                                                                  @onclick:stopPropagation="true"></span>
+                                                        </div>
+                                                    }
+                                                </div>
+                                                <Virtualize TItem="GridRow" Items="rows" Context="row" ItemSize="24" OverscanCount="24">
+                                                    <div class="psms-grid-row @(_selectedIndex == row.Index ? "row-active" : null)">
+                                                        <div class="psms-grid-cell psms-grid-rownum"
+                                                             @onclick="@(e => OnRowNumClick(e, row))"
+                                                             @onclick:stopPropagation="true">@(row.Index + 1)</div>
+                                                        @for (var c = 0; c < set.Columns.Count; c++)
+                                                        {
+                                                            var col = c;
+                                                            var cell = c < row.Cells.Count ? row.Cells[c] : null;
+                                                            var w = ColWidth(c);
+                                                            var selected = IsCellSelected(row.Index, col);
+                                                            <div class="psms-grid-cell @(cell is null ? "is-null" : null) @(selected ? "cell-selected" : null)"
+                                                                 data-col="@col"
+                                                                 style="@CellStyle(w)"
+                                                                 title="@(cell ?? "NULL")"
+                                                                 @onclick="@(e => OnCellClick(e, row, col))"
+                                                                 @ondblclick="@(() => OpenCellViewerAsync(set, row, col))">
+                                                                @(cell is null ? "NULL" : cell)
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                </Virtualize>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </MudTabPanel>
                     }
-                </div>
-            </MudTabPanel>
-        </MudTabs>
+
+                    <MudTabPanel Text="Messages">
+                        <div class="psms-messages">
+                            @foreach (var message in result.Messages)
+                            {
+                                <div>@message</div>
+                            }
+                            @if (!string.IsNullOrEmpty(result.Error))
+                            {
+                                <div class="psms-msg-error">@result.Error</div>
+                            }
+                        </div>
+                    </MudTabPanel>
+                </MudTabs>
+
+                @if (_selection.Count > 0)
+                {
+                    <div class="psms-agg-bar">
+                        <span>Count <strong>@_agg.Count</strong></span>
+                        @if (_agg.HasNumeric)
+                        {
+                            <span>Sum <strong>@FormatAgg(_agg.Sum)</strong></span>
+                            <span>Avg <strong>@FormatAgg(_agg.Avg)</strong></span>
+                            <span>Min <strong>@FormatAgg(_agg.Min)</strong></span>
+                            <span>Max <strong>@FormatAgg(_agg.Max)</strong></span>
+                        }
+                        <MudSpacer />
+                        <span class="psms-meta">Ctrl+C copy · Shift range · Ctrl multi</span>
+                    </div>
+                }
+            </div>
+
+            @if (_selectedRow is not null && result.ResultSets.Count > _activePanel && _activePanel >= 0)
+            {
+                var cols = result.ResultSets[_activePanel].Columns;
+                <aside class="psms-row-detail">
+                    <div class="psms-row-detail-head">
+                        <span>Row @(_selectedIndex + 1)</span>
+                        <button type="button" class="psms-icon-btn" @onclick="ClearSelection" title="Close">✕</button>
+                    </div>
+                    <div class="psms-row-detail-body">
+                        @for (var i = 0; i < cols.Count; i++)
+                        {
+                            var cell = i < _selectedRow.Cells.Count ? _selectedRow.Cells[i] : null;
+                            <div class="psms-row-detail-item">
+                                <div class="psms-row-detail-key">@cols[i]</div>
+                                <div class="psms-row-detail-val @(cell is null ? "is-null" : null)">@(cell ?? "NULL")</div>
+                            </div>
+                        }
+                    </div>
+                </aside>
+            }
+        </div>
     }
 </div>
 
 @code {
-    protected override void OnInitialized() => Sessions.Changed += OnChanged;
-    private void OnChanged() => InvokeAsync(StateHasChanged);
-    public void Dispose() => Sessions.Changed -= OnChanged;
+    private string _filter = string.Empty;
+    private MudTextField<string>? _filterField;
+    private bool _textMode;
+    private Guid? _boundTabId;
+    private QueryResult? _boundResult;
+    private Guid? _boundPinnedId;
+    private int _activePanel;
+    private string _gridKey = "empty";
+    private int[] _colWidths = [];
+    private int _tableWidth = 800;
+    private bool _userResizedCols;
+    private DotNetObjectReference<ResultsPane>? _resizeRef;
+    private int _selectedIndex = -1;
+    private GridRow? _selectedRow;
+    private List<GridRow>? _cachedRows;
+    private ResultSet? _cachedForSet;
+    private string _cachedFilter = "\u0001";
+    private int? _sortCol;
+    private bool _sortAsc = true;
+    private int? _cachedSortCol;
+    private bool _cachedSortAsc;
 
-    private static string FormatCell(object cell) =>
-        cell switch
+    private readonly HashSet<(int Row, int Col)> _selection = [];
+    private (int Row, int Col)? _anchor;
+    private AggState _agg = AggState.Empty;
+
+    private sealed class GridRow
+    {
+        public int Index { get; init; }
+        public IReadOnlyList<string?> Cells { get; init; } = [];
+    }
+
+    private readonly record struct AggState(int Count, bool HasNumeric, double Sum, double Avg, double Min, double Max)
+    {
+        public static AggState Empty => new(0, false, 0, 0, 0, 0);
+    }
+
+    private QueryResult? DisplayResult =>
+        Sessions.ViewingPinned?.Result ?? Sessions.ActiveTab?.LastResult;
+
+    protected override void OnInitialized()
+    {
+        Sessions.Changed += OnChanged;
+        _boundTabId = Sessions.ActiveTab?.Id;
+        _boundResult = DisplayResult;
+        _boundPinnedId = Sessions.ViewingPinnedId;
+        RebuildLayout();
+    }
+
+    private void OnChanged()
+    {
+        var tab = Sessions.ActiveTab;
+        var result = DisplayResult;
+        if (tab?.Id == _boundTabId
+            && ReferenceEquals(result, _boundResult)
+            && Sessions.ViewingPinnedId == _boundPinnedId)
         {
-            DateTime dt => dt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture),
-            DateTimeOffset dto => dto.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture),
-            byte[] bytes => $"0x{Convert.ToHexString(bytes)}",
-            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
-            _ => cell.ToString() ?? string.Empty
+            return;
+        }
+
+        _boundTabId = tab?.Id;
+        _boundResult = result;
+        _boundPinnedId = Sessions.ViewingPinnedId;
+        _filter = string.Empty;
+        _sortCol = null;
+        _sortAsc = true;
+        _userResizedCols = false;
+        _activePanel = 0;
+        ClearSelection();
+        InvalidateCache();
+        RebuildLayout();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnPanelChanged(int index)
+    {
+        _activePanel = index;
+        _sortCol = null;
+        _sortAsc = true;
+        _userResizedCols = false;
+        ClearSelection();
+        InvalidateCache();
+        RebuildLayout();
+    }
+
+    private void OnFilterChanged()
+    {
+        InvalidateCache();
+        RebuildLayout();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void InvalidateCache()
+    {
+        _cachedRows = null;
+        _cachedForSet = null;
+        _cachedFilter = "\u0001";
+        _cachedSortCol = null;
+    }
+
+    private void ToggleSort(int col)
+    {
+        if (_sortCol == col)
+        {
+            if (_sortAsc)
+            {
+                _sortAsc = false;
+            }
+            else
+            {
+                _sortCol = null;
+                _sortAsc = true;
+            }
+        }
+        else
+        {
+            _sortCol = col;
+            _sortAsc = true;
+        }
+
+        ClearSelection();
+        InvalidateCache();
+        RebuildLayout();
+    }
+
+    private void RebuildLayout()
+    {
+        var display = DisplayResult;
+        if (display is null || _activePanel < 0 || _activePanel >= display.ResultSets.Count)
+        {
+            _gridKey = "empty";
+            _colWidths = [];
+            _tableWidth = 800;
+            return;
+        }
+
+        var set = display.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        if (!_userResizedCols || _colWidths.Length != set.Columns.Count)
+        {
+            _colWidths = ComputeColumnWidths(set, rows);
+            _userResizedCols = false;
+        }
+
+        _tableWidth = 52 + _colWidths.Sum();
+        _gridKey = $"{_boundTabId}-{_boundPinnedId}-{_activePanel}-{display.ElapsedMilliseconds}-{rows.Count}-{_filter}-{_sortCol}-{_sortAsc}-{_tableWidth}";
+    }
+
+    private async Task StartColResizeAsync(MouseEventArgs e, int col)
+    {
+        _resizeRef ??= DotNetObjectReference.Create(this);
+        var startWidth = ColWidth(col);
+        try
+        {
+            await Js.InvokeVoidAsync("psmsColResize.start", _resizeRef, col, e.ClientX, startWidth);
+        }
+        catch
+        {
+            // script may not be loaded yet
+        }
+    }
+
+    [JSInvokable]
+    public void OnColResizeEnd(int colIndex, double width)
+    {
+        if (colIndex < 0 || colIndex >= _colWidths.Length)
+        {
+            return;
+        }
+
+        _userResizedCols = true;
+        _colWidths[colIndex] = (int)Math.Round(width);
+        _tableWidth = 52 + _colWidths.Sum();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private int ColWidth(int index) =>
+        index >= 0 && index < _colWidths.Length ? _colWidths[index] : 120;
+
+    private static string CellStyle(int width) =>
+        $"--col-w:{width}px";
+
+    private string TabLabel(int index, ResultSet set)
+    {
+        var n = set.DisplayRows.Count > 0 ? set.DisplayRows.Count : set.Rows.Count;
+        if (!string.IsNullOrWhiteSpace(_filter) && _activePanel == index)
+        {
+            n = GetGridRows(set).Count;
+        }
+
+        return index == 0 && DisplayResult?.ResultSets.Count == 1
+            ? $"Results ({n:N0})"
+            : $"Results {index + 1} ({n:N0})";
+    }
+
+    private List<GridRow> GetGridRows(ResultSet set)
+    {
+        if (_cachedRows is not null
+            && ReferenceEquals(_cachedForSet, set)
+            && _cachedFilter == _filter
+            && _cachedSortCol == _sortCol
+            && _cachedSortAsc == _sortAsc)
+        {
+            return _cachedRows;
+        }
+
+        var display = set.DisplayRows.Count > 0
+            ? set.DisplayRows
+            : set.Rows.Select(ResultMaterializer.FormatRow).ToList();
+
+        IEnumerable<(int Index, IReadOnlyList<string?> Cells)> source = display.Select((cells, i) => (i, cells));
+        if (!string.IsNullOrWhiteSpace(_filter))
+        {
+            var needle = _filter.Trim();
+            source = source.Where(x =>
+                x.Cells.Any(c => c is not null && c.Contains(needle, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (_sortCol is int sortCol && sortCol >= 0 && sortCol < set.Columns.Count)
+        {
+            var asc = _sortAsc;
+            source = asc
+                ? source.OrderBy(x => x.Cells.ElementAtOrDefault(sortCol), CellComparer.Instance)
+                : source.OrderByDescending(x => x.Cells.ElementAtOrDefault(sortCol), CellComparer.Instance);
+        }
+
+        _cachedRows = source.Select(x => new GridRow { Index = x.Index, Cells = x.Cells }).ToList();
+        _cachedForSet = set;
+        _cachedFilter = _filter;
+        _cachedSortCol = _sortCol;
+        _cachedSortAsc = _sortAsc;
+        return _cachedRows;
+    }
+
+    private sealed class CellComparer : IComparer<string?>
+    {
+        public static readonly CellComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (x is null && y is null)
+            {
+                return 0;
+            }
+
+            if (x is null)
+            {
+                return 1;
+            }
+
+            if (y is null)
+            {
+                return -1;
+            }
+
+            if (decimal.TryParse(x, NumberStyles.Any, CultureInfo.InvariantCulture, out var dx)
+                && decimal.TryParse(y, NumberStyles.Any, CultureInfo.InvariantCulture, out var dy))
+            {
+                return dx.CompareTo(dy);
+            }
+
+            if (DateTime.TryParse(x, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dtx)
+                && DateTime.TryParse(y, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dty))
+            {
+                return dtx.CompareTo(dty);
+            }
+
+            return string.Compare(x, y, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static int[] ComputeColumnWidths(ResultSet set, List<GridRow> rows)
+    {
+        var n = set.Columns.Count;
+        var widths = new int[n];
+        for (var i = 0; i < n; i++)
+        {
+            widths[i] = MeasureText(set.Columns[i]) + 20;
+        }
+
+        var sample = Math.Min(rows.Count, 120);
+        for (var r = 0; r < sample; r++)
+        {
+            var cells = rows[r].Cells;
+            for (var i = 0; i < n && i < cells.Count; i++)
+            {
+                var text = cells[i] ?? "NULL";
+                if (text.Length > 64)
+                {
+                    text = text[..64];
+                }
+
+                widths[i] = Math.Max(widths[i], MeasureText(text) + 16);
+            }
+        }
+
+        for (var i = 0; i < n; i++)
+        {
+            widths[i] = Math.Clamp(widths[i], 72, 280);
+        }
+
+        return widths;
+    }
+
+    private static int MeasureText(string text)
+    {
+        double w = 0;
+        foreach (var ch in text)
+        {
+            w += ch switch
+            {
+                'i' or 'l' or 'I' or '1' or '.' or ',' or ':' or ';' or ' ' or '|' => 5.2,
+                'W' or 'M' or 'm' or '@' or '—' => 9.2,
+                _ => 7.0
+            };
+        }
+
+        return (int)Math.Ceiling(w);
+    }
+
+    private bool IsCellSelected(int row, int col) => _selection.Contains((row, col));
+
+    private void OnCellClick(MouseEventArgs e, GridRow row, int col)
+    {
+        _selectedIndex = row.Index;
+        _selectedRow = row;
+
+        if (e.CtrlKey || e.MetaKey)
+        {
+            var key = (row.Index, col);
+            if (!_selection.Add(key))
+            {
+                _selection.Remove(key);
+            }
+
+            _anchor = (row.Index, col);
+        }
+        else if (e.ShiftKey && _anchor is { } anchor)
+        {
+            _selection.Clear();
+            var r0 = Math.Min(anchor.Row, row.Index);
+            var r1 = Math.Max(anchor.Row, row.Index);
+            var c0 = Math.Min(anchor.Col, col);
+            var c1 = Math.Max(anchor.Col, col);
+            for (var r = r0; r <= r1; r++)
+            {
+                for (var c = c0; c <= c1; c++)
+                {
+                    _selection.Add((r, c));
+                }
+            }
+        }
+        else
+        {
+            _selection.Clear();
+            _selection.Add((row.Index, col));
+            _anchor = (row.Index, col);
+        }
+
+        RecomputeAgg();
+    }
+
+    private void OnRowNumClick(MouseEventArgs e, GridRow row)
+    {
+        _selectedIndex = row.Index;
+        _selectedRow = row;
+        var colCount = DisplayResult?.ResultSets.ElementAtOrDefault(_activePanel)?.Columns.Count ?? 0;
+
+        if (!(e.CtrlKey || e.MetaKey))
+        {
+            _selection.Clear();
+        }
+
+        for (var c = 0; c < colCount; c++)
+        {
+            _selection.Add((row.Index, c));
+        }
+
+        _anchor = (row.Index, 0);
+        RecomputeAgg();
+    }
+
+    private void RecomputeAgg()
+    {
+        if (_selection.Count == 0 || DisplayResult is null || _activePanel >= DisplayResult.ResultSets.Count)
+        {
+            _agg = AggState.Empty;
+            return;
+        }
+
+        var set = DisplayResult.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        var byIndex = rows.ToDictionary(r => r.Index);
+        var values = new List<double>();
+        var count = 0;
+
+        foreach (var (row, col) in _selection)
+        {
+            if (!byIndex.TryGetValue(row, out var gridRow) || col < 0 || col >= gridRow.Cells.Count)
+            {
+                continue;
+            }
+
+            count++;
+            var text = gridRow.Cells[col];
+            if (text is not null &&
+                double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var n))
+            {
+                values.Add(n);
+            }
+        }
+
+        if (values.Count == 0)
+        {
+            _agg = new AggState(count, false, 0, 0, 0, 0);
+            return;
+        }
+
+        var sum = values.Sum();
+        _agg = new AggState(count, true, sum, sum / values.Count, values.Min(), values.Max());
+    }
+
+    private static string FormatAgg(double value) =>
+        value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private void ClearSelection()
+    {
+        _selectedIndex = -1;
+        _selectedRow = null;
+        _selection.Clear();
+        _anchor = null;
+        _agg = AggState.Empty;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("f", StringComparison.OrdinalIgnoreCase))
+        {
+            await FocusFilterAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("c", StringComparison.OrdinalIgnoreCase))
+        {
+            await CopySelectionAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            ClearSelection();
+        }
+    }
+
+    public async Task FocusFilterAsync()
+    {
+        if (_filterField is not null)
+        {
+            await _filterField.FocusAsync();
+        }
+    }
+
+    private void ToggleTextMode() => _textMode = !_textMode;
+
+    private static string BuildTextView(ResultSet set, List<GridRow> rows)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join('\t', set.Columns));
+        var take = Math.Min(rows.Count, 5_000);
+        for (var i = 0; i < take; i++)
+        {
+            sb.AppendLine(string.Join('\t', rows[i].Cells.Select(c => c ?? "NULL")));
+        }
+
+        if (rows.Count > take)
+        {
+            sb.AppendLine($"… {rows.Count - take:N0} more rows omitted");
+        }
+
+        return sb.ToString();
+    }
+
+    private async Task CopyTextAsync()
+    {
+        var result = DisplayResult;
+        if (result is null || _activePanel >= result.ResultSets.Count)
+        {
+            return;
+        }
+
+        var set = result.ResultSets[_activePanel];
+        var text = BuildTextView(set, GetGridRows(set));
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("Copied text results.", Severity.Info);
+        }
+        catch
+        {
+            Snackbar.Add("Clipboard copy failed.", Severity.Warning);
+        }
+    }
+
+    private async Task CopyInsertAsync()
+    {
+        var result = DisplayResult;
+        if (result is null || _activePanel >= result.ResultSets.Count)
+        {
+            return;
+        }
+
+        var set = result.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        if (rows.Count == 0 || set.Columns.Count == 0)
+        {
+            Snackbar.Add("Nothing to script.", Severity.Warning);
+            return;
+        }
+
+        var cols = string.Join(", ", set.Columns.Select(QuoteIdent));
+        var sb = new StringBuilder();
+        var take = Math.Min(rows.Count, 500);
+        for (var i = 0; i < take; i++)
+        {
+            var values = string.Join(", ", rows[i].Cells.Select(SqlLiteral));
+            sb.Append("INSERT INTO /*table*/ (").Append(cols).Append(") VALUES (").Append(values).AppendLine(");");
+        }
+
+        if (rows.Count > take)
+        {
+            sb.AppendLine($"-- … {rows.Count - take:N0} more rows omitted");
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", sb.ToString());
+            Snackbar.Add($"Copied {take:N0} INSERT statement{(take == 1 ? "" : "s")}.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Clipboard copy failed.", Severity.Warning);
+        }
+    }
+
+    private static string QuoteIdent(string name) =>
+        "[" + name.Replace("]", "]]", StringComparison.Ordinal) + "]";
+
+    private static string SqlLiteral(string? value)
+    {
+        if (value is null)
+        {
+            return "NULL";
+        }
+
+        if (bool.TryParse(value, out var b))
+        {
+            return b ? "1" : "0";
+        }
+
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+        {
+            return value;
+        }
+
+        if (decimal.TryParse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _)
+            && value.IndexOf('e', StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return value;
+        }
+
+        return "N'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+    }
+
+    private async Task CopySelectionAsync()
+    {
+        if (DisplayResult is null || _activePanel >= DisplayResult.ResultSets.Count)
+        {
+            return;
+        }
+
+        var set = DisplayResult.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        string text;
+
+        if (_selection.Count == 0)
+        {
+            if (_selectedRow is null)
+            {
+                return;
+            }
+
+            text = string.Join('\t', _selectedRow.Cells.Select(c => c ?? string.Empty));
+        }
+        else
+        {
+            var byIndex = rows.ToDictionary(r => r.Index);
+            var grouped = _selection
+                .GroupBy(x => x.Row)
+                .OrderBy(g => g.Key);
+            var sb = new StringBuilder();
+            foreach (var group in grouped)
+            {
+                if (!byIndex.TryGetValue(group.Key, out var gridRow))
+                {
+                    continue;
+                }
+
+                var cols = group.Select(x => x.Col).Distinct().OrderBy(c => c).ToList();
+                sb.AppendLine(string.Join('\t', cols.Select(c =>
+                    c < gridRow.Cells.Count ? (gridRow.Cells[c] ?? string.Empty) : string.Empty)));
+            }
+
+            text = sb.ToString().TrimEnd('\r', '\n');
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("Copied.", Severity.Info);
+        }
+        catch
+        {
+            Snackbar.Add("Clipboard copy failed.", Severity.Warning);
+        }
+    }
+
+    private void PinAsync()
+    {
+        var pin = Sessions.PinCurrentResult();
+        if (pin is null)
+        {
+            Snackbar.Add("Nothing to pin.", Severity.Warning);
+            return;
+        }
+
+        Snackbar.Add("Results pinned.", Severity.Success);
+    }
+
+    private async Task OpenChartAsync()
+    {
+        var result = DisplayResult;
+        if (result is null || _activePanel >= result.ResultSets.Count)
+        {
+            return;
+        }
+
+        var set = result.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        var parameters = new DialogParameters<ResultsChartDialog>
+        {
+            { x => x.Columns, set.Columns },
+            { x => x.Rows, rows.Select(r => r.Cells).ToList() }
         };
+        await Dialogs.ShowAsync<ResultsChartDialog>("Results chart", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        });
+    }
+
+    private async Task OpenCellViewerAsync(ResultSet set, GridRow row, int col)
+    {
+        var name = col < set.Columns.Count ? set.Columns[col] : "Value";
+        var value = col < row.Cells.Count ? row.Cells[col] : null;
+        var parameters = new DialogParameters<CellViewerDialog>
+        {
+            { x => x.ColumnName, name },
+            { x => x.Value, value }
+        };
+        await Dialogs.ShowAsync<CellViewerDialog>(name, parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        });
+    }
+
+    private static string VisibleRowLabel(QueryResult result)
+    {
+        var n = result.ResultSets.Sum(s => s.DisplayRows.Count > 0 ? s.DisplayRows.Count : s.Rows.Count);
+        return $"{n:N0} row{(n == 1 ? "" : "s")}";
+    }
 
     private async Task ExportCsvAsync()
     {
-        var result = Sessions.ActiveTab?.LastResult;
+        var result = DisplayResult;
         if (result is null || result.ResultSets.Count == 0)
         {
             return;
         }
 
-        // Export the first result set (primary grid).
-        var set = result.ResultSets[0];
+        var set = result.ResultSets[Math.Clamp(_activePanel, 0, result.ResultSets.Count - 1)];
         var path = await FileDialogs.SaveCsvFileAsync("results.csv");
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
 
-        var sb = new StringBuilder();
-        sb.AppendLine(string.Join(',', set.Columns.Select(EscapeCsv)));
-        foreach (var row in set.Rows)
-        {
-            sb.AppendLine(string.Join(',', row.Select(c => EscapeCsv(c is null ? string.Empty : FormatCell(c)))));
-        }
-
-        await File.WriteAllTextAsync(path, sb.ToString());
+        await File.WriteAllTextAsync(path, ResultMaterializer.BuildCsv(set));
         Snackbar.Add($"Exported to {path}", Severity.Success);
     }
 
-    private static string EscapeCsv(string value)
+    private async Task ExportJsonAsync()
     {
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
+        var result = DisplayResult;
+        if (result is null || _activePanel < 0 || _activePanel >= result.ResultSets.Count)
         {
-            return $"\"{value.Replace("\"", "\"\"")}\"";
+            return;
         }
 
-        return value;
+        var set = result.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        var path = await FileDialogs.SaveJsonFileAsync("results.json");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var list = new List<Dictionary<string, object?>>(rows.Count);
+        foreach (var row in rows)
+        {
+            var obj = new Dictionary<string, object?>(set.Columns.Count, StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < set.Columns.Count; i++)
+            {
+                var name = set.Columns[i];
+                var key = name;
+                var n = 1;
+                while (!obj.TryAdd(key, i < row.Cells.Count ? row.Cells[i] : null))
+                {
+                    key = $"{name}_{++n}";
+                }
+            }
+
+            list.Add(obj);
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(list, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true
+        });
+        await File.WriteAllTextAsync(path, json);
+        Snackbar.Add($"Exported {rows.Count:N0} row(s) to {path}", Severity.Success);
+    }
+
+    private async Task CopyMarkdownAsync()
+    {
+        var result = DisplayResult;
+        if (result is null || _activePanel < 0 || _activePanel >= result.ResultSets.Count)
+        {
+            return;
+        }
+
+        var set = result.ResultSets[_activePanel];
+        var rows = GetGridRows(set);
+        var take = Math.Min(rows.Count, 2_000);
+        var sb = new StringBuilder();
+        sb.Append('|').Append(string.Join('|', set.Columns)).Append('|').AppendLine();
+        sb.Append('|').Append(string.Join('|', set.Columns.Select(_ => "---"))).Append('|').AppendLine();
+        for (var i = 0; i < take; i++)
+        {
+            var cells = rows[i].Cells.Select(c => EscapeMd(c ?? "NULL"));
+            sb.Append('|').Append(string.Join('|', cells)).Append('|').AppendLine();
+        }
+
+        if (rows.Count > take)
+        {
+            sb.AppendLine($"> … {rows.Count - take:N0} more rows omitted");
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", sb.ToString());
+            Snackbar.Add($"Copied {take:N0} row(s) as Markdown.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Could not copy to clipboard.", Severity.Warning);
+        }
+    }
+
+    private static string EscapeMd(string value) =>
+        value.Replace("|", "\\|").Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+
+    public void Dispose()
+    {
+        Sessions.Changed -= OnChanged;
+        _resizeRef?.Dispose();
     }
 }

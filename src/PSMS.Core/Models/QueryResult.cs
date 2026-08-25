@@ -4,6 +4,8 @@ public sealed class ResultSet
 {
     public IReadOnlyList<string> Columns { get; init; } = [];
     public IReadOnlyList<IReadOnlyList<object?>> Rows { get; init; } = [];
+    /// <summary>Pre-formatted display strings (same shape as Rows). Prefer this in the UI.</summary>
+    public IReadOnlyList<IReadOnlyList<string?>> DisplayRows { get; init; } = [];
     public bool Truncated { get; init; }
 }
 
