@@ -42,14 +42,11 @@
                   Vital="yes"
                   PerMachine="yes"
                   Compressed="yes"
+                  SourceFile="..\..\redist\aspnetcore-runtime-win-x64.exe"
                   DetectCondition="AspNetCore10Version &gt;= v10.0.0"
                   InstallArguments="/install /quiet /norestart"
                   RepairArguments="/repair /quiet /norestart"
-                  UninstallArguments="/uninstall /quiet /norestart">
-        <ExePackagePayload
-            Name="aspnetcore-runtime-win-x64.exe"
-            SourceFile="..\..\redist\aspnetcore-runtime-win-x64.exe" />
-      </ExePackage>
+                  UninstallArguments="/uninstall /quiet /norestart" />
 
       <!-- Application MSI produced by PSMS.Installer -->
       <MsiPackage Id="PSMS"
