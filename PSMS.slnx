@@ -2,7 +2,10 @@
   <Folder Name="/src/">
     <Project Path="src/PSMS.App/PSMS.App.csproj" />
     <Project Path="src/PSMS.Core/PSMS.Core.csproj" />
+    <Project Path="src/PSMS.Installer/PSMS.Installer.wixproj" />
+    <Project Path="src/PSMS.Bundle/PSMS.Bundle.wixproj" />
     <Project Path="src/PSMS.Providers.SqlServer/PSMS.Providers.SqlServer.csproj" />
+
     <Project Path="src/PSMS.Providers.Sqlite/PSMS.Providers.Sqlite.csproj" />
     <Project Path="src/PSMS.Providers.Access/PSMS.Providers.Access.csproj" />
   </Folder>

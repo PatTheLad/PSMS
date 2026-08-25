@@ -1,0 +1,40 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>PSMS-Setup</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <Version>1.0.0</Version>
+    <!-- Harvested publish output from ProjectReference Publish=true -->
+    <PublishFolder>$(IntermediateOutputPath)publish\PSMS.App\</PublishFolder>
+    <DefineConstants>PublishFolder=$(PublishFolder);ProductVersion=$(Version)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Heat" Version="5.0.2" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Netfx.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Publish framework-dependent win-x64 (runtime installed by the Setup EXE bootstrapper) -->
+    <ProjectReference Include="..\PSMS.App\PSMS.App.csproj" Publish="true">
+      <Properties>RuntimeIdentifier=win-x64;SelfContained=false;PublishSingleFile=false;PublishReadyToRun=false</Properties>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <HarvestDirectory Include="$(PublishFolder)">
+      <ComponentGroupName>PublishedComponents</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+      <SuppressCom>true</SuppressCom>
+      <SuppressRegistry>true</SuppressRegistry>
+      <PreprocessorVariable>var.PublishFolder</PreprocessorVariable>
+    </HarvestDirectory>
+    <BindPath Include="$(PublishFolder)" />
+  </ItemGroup>
+
+</Project>

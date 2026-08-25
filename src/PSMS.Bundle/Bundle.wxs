@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+
+  <!--
+    Setup EXE (Burn bootstrapper):
+      1. Detect ASP.NET Core 10 x64 (required by Photino + Blazor)
+      2. Install it quietly if missing
+      3. Install the PSMS MSI
+  -->
+  <Bundle Name="PSMS"
+          Manufacturer="PSMS"
+          Version="$(var.ProductVersion)"
+          UpgradeCode="c4e91f20-7a8b-4d2e-9f11-3b6c8d0e5a72"
+          IconSourceFile="..\PSMS.App\wwwroot\favicon.ico"
+          AboutUrl="https://github.com/PatTheLad/PSMS"
+          HelpUrl="https://github.com/PatTheLad/PSMS"
+          Compressed="yes">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          LicenseUrl="https://github.com/PatTheLad/PSMS"
+          Theme="hyperlinkLicense"
+          ShowVersion="yes"
+          SuppressOptionsUI="no" />
+    </BootstrapperApplication>
+
+    <!-- Highest installed ASP.NET Core 10.x x64 version, or empty if none -->
+    <netfx:DotNetCoreSearch Id="SearchAspNetCore10"
+                            RuntimeType="aspnet"
+                            MajorVersion="10"
+                            Platform="x64"
+                            Variable="AspNetCore10Version" />
+
+    <Chain DisableRollback="no">
+      <!-- Skip when ASP.NET Core 10+ is already present -->
+      <ExePackage Id="AspNetCoreRuntime10"
+                  DisplayName="Microsoft ASP.NET Core 10 Runtime (x64)"
+                  Description="Required to run PSMS"
+                  Permanent="yes"
+                  Vital="yes"
+                  PerMachine="yes"
+                  Compressed="yes"
+                  DetectCondition="AspNetCore10Version &gt;= v10.0.0"
+                  InstallArguments="/install /quiet /norestart"
+                  RepairArguments="/repair /quiet /norestart"
+                  UninstallArguments="/uninstall /quiet /norestart">
+        <ExePackagePayload
+            Name="aspnetcore-runtime-win-x64.exe"
+            SourceFile="..\..\redist\aspnetcore-runtime-win-x64.exe" />
+      </ExePackage>
+
+      <!-- Application MSI produced by PSMS.Installer -->
+      <MsiPackage Id="PSMS"
+                  DisplayName="PSMS — SQL Management Studio"
+                  SourceFile="$(var.PSMS.Installer.TargetPath)"
+                  Compressed="yes"
+                  Vital="yes"
+                  Visible="no" />
+    </Chain>
+  </Bundle>
+</Wix>

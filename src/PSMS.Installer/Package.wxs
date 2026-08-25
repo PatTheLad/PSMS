@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+
+  <!--
+    Stable UpgradeCode — do not change between releases or Windows will treat
+    upgrades as a different product.
+  -->
+  <Package Name="PSMS"
+           Manufacturer="PSMS"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="688aa83b-a2c4-45c1-9c0d-71ef39feb1b9"
+           Scope="perMachine"
+           Language="1033">
+
+    <SummaryInformation Description="PSMS — SQL Management Studio"
+                        Manufacturer="PSMS" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of PSMS is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="..\PSMS.App\wwwroot\favicon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/PatTheLad/PSMS" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/PatTheLad/PSMS" />
+
+    <!--
+      Guardrail if someone runs the MSI directly (without the Setup EXE).
+      Property is 0 when a compatible runtime is present.
+    -->
+    <netfx:DotNetCompatibilityCheck Id="AspNetCore10Check"
+                                    Property="ASPNETCORE10STATUS"
+                                    RuntimeType="aspnet"
+                                    Version="10.0.0"
+                                    RollForward="latestMajor"
+                                    Platform="x64" />
+    <Launch Condition="Installed OR ASPNETCORE10STATUS = &quot;0&quot;"
+            Message="PSMS requires the ASP.NET Core 10 Runtime (x64).&#10;&#10;Use PSMS-Setup-*-win-x64.exe (recommended — it installs .NET automatically), or install the runtime from https://dotnet.microsoft.com/download/dotnet/10.0 and run this MSI again." />
+
+    <!-- Standard folder picker UI -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PSMS" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="PSMS" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Feature Id="ProductFeature"
+             Title="PSMS"
+             Description="PSMS desktop application"
+             Level="1"
+             AllowAbsent="no">
+      <ComponentGroupRef Id="PublishedComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Start Menu shortcut -->
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="e1c326ea-168a-467e-8d59-007106509876">
+      <Shortcut Id="ApplicationStartMenuShortcut"
+                Name="PSMS"
+                Description="PSMS — SQL Management Studio"
+                Target="[INSTALLFOLDER]PSMS.App.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\PSMS"
+                     Name="StartMenuShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- Desktop shortcut -->
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="a7f41c22-9b33-4d1e-9f0a-2c8e5d6b1a44">
+      <Shortcut Id="ApplicationDesktopShortcut"
+                Name="PSMS"
+                Description="PSMS — SQL Management Studio"
+                Target="[INSTALLFOLDER]PSMS.App.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\PSMS"
+                     Name="DesktopShortcut"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+  </Package>
+</Wix>

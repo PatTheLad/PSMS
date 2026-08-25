@@ -28,8 +28,15 @@ bld/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+redist/
 *.nupkg
 **/[Pp]ackages/*
+*.msi
+*.wixpdb
+*.wixobj
+
+# Accidental empty files
+/localhost
 
 # IDE
 .vs/

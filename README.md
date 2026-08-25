@@ -31,6 +31,27 @@ dotnet build
 dotnet run --project src/PSMS.App
 ```
 
+### Windows Setup installer
+
+Every push to **`main`** builds a Setup EXE on GitHub Actions and publishes it to the [`latest` release](https://github.com/PatTheLad/PSMS/releases/tag/latest).
+
+**Recommended download:** `PSMS-Setup-*-win-x64.exe` — detects ASP.NET Core 10 (x64) and installs it if missing, then installs PSMS.
+
+Local build on a **Windows** machine with the .NET 10 SDK (WiX is restored from NuGet):
+
+```powershell
+.\build-msi.ps1 -Configuration Release -Version 1.0.0
+```
+
+Outputs:
+
+- `artifacts\PSMS-Setup-1.0.0-win-x64.exe` — bootstrapper (auto-installs .NET 10 when needed)
+- `artifacts\PSMS-Setup-1.0.0-win-x64.msi` — app only (requires ASP.NET Core 10 already installed)
+
+- Installs under `Program Files\PSMS`
+- Adds Start Menu + Desktop shortcuts
+- Target PCs need the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)
+
 ## Features
 
 - Modern slate/teal dark shell with resizable Object Explorer and editor/results splitter

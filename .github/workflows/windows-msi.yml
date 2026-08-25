@@ -1,0 +1,80 @@
+name: Windows Setup
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute version
+        id: ver
+        shell: pwsh
+        run: |
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $ver = "1.0.$env:GITHUB_RUN_NUMBER"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build Setup EXE (with .NET 10 bootstrap)
+        shell: pwsh
+        run: |
+          .\build-msi.ps1 -Configuration Release -Version "${{ steps.ver.outputs.version }}"
+
+      - name: Stage stable release filenames
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.exe | Select-Object -First 1
+          $msi = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.msi | Select-Object -First 1
+          if (-not $exe) { throw 'Setup EXE not found' }
+          Copy-Item $exe.FullName artifacts/PSMS-Setup-win-x64.exe -Force
+          if ($msi) { Copy-Item $msi.FullName artifacts/PSMS-Setup-win-x64.msi -Force }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PSMS-Setup-win-x64
+          path: |
+            artifacts/PSMS-Setup-*-win-x64.exe
+            artifacts/PSMS-Setup-*-win-x64.msi
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release (latest)
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest (main)
+          allowUpdates: true
+          removeArtifacts: true
+          replacesArtifacts: true
+          makeLatest: true
+          generateReleaseNotes: true
+          body: |
+            Continuous Windows build from `main`.
+
+            **Commit:** `${{ github.sha }}` (`${{ steps.ver.outputs.sha }}`)
+            **Version:** `${{ steps.ver.outputs.version }}`
+
+            ### Install
+            Download **`PSMS-Setup-win-x64.exe`** (recommended). It will:
+            1. Detect ASP.NET Core 10 (x64)
+            2. Install it automatically if missing
+            3. Install PSMS
+
+            The standalone `.msi` requires ASP.NET Core 10 already installed.
+
+            Target PCs also need [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (usually present with Edge).
+          artifacts: artifacts/PSMS-Setup-win-x64.exe,artifacts/PSMS-Setup-win-x64.msi
+          token: ${{ secrets.GITHUB_TOKEN }}
