@@ -1,0 +1,74 @@
+<div class="psms-admin-toolbar">
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="Create" Disabled="Busy">Create database</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+               StartIcon="@Icons.Material.Filled.SettingsBackupRestore" OnClick="() => Restore(null)" Disabled="Busy">Restore…</MudButton>
+    <MudSpacer />
+    <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                  Placeholder="Filter databases…" Style="max-width:220px" Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search" />
+</div>
+
+@if (Busy && Databases is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (Databases is null || Databases.Count == 0)
+{
+    <MudText Class="pa-3 mud-text-secondary">No databases loaded.</MudText>
+}
+else
+{
+    <MudTable Items="Filtered" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>State</MudTh>
+            <MudTh>Recovery</MudTh>
+            <MudTh>Data MB</MudTh>
+            <MudTh>Log MB</MudTh>
+            <MudTh>Last full backup</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudText Typo="Typo.body2" Style="font-weight:600">@context.Name</MudText>
+                @if (context.IsSystem)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">system</MudChip>
+                }
+            </MudTd>
+            <MudTd>@context.State</MudTd>
+            <MudTd>@context.RecoveryModel</MudTd>
+            <MudTd>@context.DataSizeMb.ToString("N1")</MudTd>
+            <MudTd>@context.LogSizeMb.ToString("N1")</MudTd>
+            <MudTd>@(context.LastFullBackup?.LocalDateTime.ToString("g") ?? "—")</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Backup" Size="Size.Small" title="Backup"
+                               Disabled="Busy" OnClick="() => Backup(context.Name)" />
+                <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Size="Size.Small" title="Restore"
+                               Disabled="Busy" OnClick="() => Restore(context.Name)" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public IReadOnlyList<DatabaseAdminInfo>? Databases { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public EventCallback<string> OnBackup { get; set; }
+    [Parameter] public EventCallback<string?> OnRestore { get; set; }
+
+    private string _filter = string.Empty;
+
+    private IEnumerable<DatabaseAdminInfo> Filtered =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? Databases ?? []
+            : (Databases ?? []).Where(d => d.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    private Task Create() => OnCreate.InvokeAsync();
+    private Task Backup(string db) => OnBackup.InvokeAsync(db);
+    private Task Restore(string? db) => OnRestore.InvokeAsync(db);
+}

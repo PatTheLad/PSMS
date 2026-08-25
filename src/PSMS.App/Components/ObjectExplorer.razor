@@ -3,6 +3,7 @@
 @inject ActiveSessionService Sessions
 @inject SchemaIntelliSenseService IntelliSense
 @inject ContextMenuService Menus
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -296,6 +297,8 @@
         [
             new ContextMenuItem { Text = "Connect", Action = () => EnsureConnectedAsync(connection, expand: true) },
             new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, connection.Database ?? "master") },
+            new ContextMenuItem { Text = "Create Database…", Action = () => CreateDatabaseAsync(connection) },
+            new ContextMenuItem { Text = "Open Admin", Action = () => OpenAdmin(connection) },
             new ContextMenuItem { IsDivider = true, Text = "-" },
             new ContextMenuItem { Text = "Refresh", Action = () => RefreshConnectionAsync(connection) },
             new ContextMenuItem { Text = "Disconnect", Action = () => { Disconnect(connection); return Task.CompletedTask; } },
@@ -309,6 +312,8 @@
         Menus.Open(e.ClientX, e.ClientY,
         [
             new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) },
+            new ContextMenuItem { Text = "Backup…", Action = () => BackupDatabaseAsync(connection, database) },
+            new ContextMenuItem { Text = "Restore…", Action = () => RestoreDatabaseAsync(connection, database) },
             new ContextMenuItem { Text = "Refresh", Action = () => LoadSchemasAsync(connection, database, force: true) }
         ]);
     }
@@ -571,6 +576,55 @@
         Sessions.MarkConnected(connection);
         _ = IntelliSense.EnsureAsync(connection, database);
         return OnOpenQuery.InvokeAsync((connection, database, sql, title));
+    }
+
+    private Task OpenAdmin(ConnectionDefinition connection)
+    {
+        Sessions.MarkConnected(connection);
+        Sessions.SelectConnection(connection.Id);
+        Sessions.ShowAdmin();
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateDatabaseAsync(ConnectionDefinition connection)
+    {
+        await EnsureConnectedAsync(connection, expand: true);
+        var parameters = new DialogParameters<CreateDatabaseDialog>
+        {
+            { x => x.Connection, connection }
+        };
+        var dialog = await DialogService.ShowAsync<CreateDatabaseDialog>("Create database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshConnectionAsync(connection);
+        }
+    }
+
+    private async Task BackupDatabaseAsync(ConnectionDefinition connection, string database)
+    {
+        var parameters = new DialogParameters<BackupDatabaseDialog>
+        {
+            { x => x.Connection, connection },
+            { x => x.Database, database }
+        };
+        var dialog = await DialogService.ShowAsync<BackupDatabaseDialog>($"Backup — {database}", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        await dialog.Result;
+    }
+
+    private async Task RestoreDatabaseAsync(ConnectionDefinition connection, string database)
+    {
+        var parameters = new DialogParameters<RestoreDatabaseDialog>
+        {
+            { x => x.Connection, connection },
+            { x => x.Database, database }
+        };
+        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshConnectionAsync(connection);
+        }
     }
 
     private Task SelectTop1000(ConnectionDefinition connection, string database, string schema, string table)

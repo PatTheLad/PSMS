@@ -1,0 +1,92 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Full backup of <strong>@Database</strong> on @Connection.Server.
+                Path is on the <em>SQL Server host</em> (container path when using Docker).
+            </MudText>
+            <MudTextField @bind-Value="_request.BackupPath" Label="Backup path (.bak)" Required="true"
+                          HelperText="Example (Linux): /var/opt/mssql/data/MyDb.bak" />
+            <MudCheckBox @bind-Value="_request.Compress" Label="Compression" Color="Color.Primary" />
+            <MudCheckBox @bind-Value="_request.CopyOnly" Label="Copy-only (does not affect restore chain)" Color="Color.Primary" />
+            <MudCheckBox @bind-Value="_request.Init" Label="INIT (overwrite media)" Color="Color.Primary" />
+            <MudCheckBox @bind-Value="_request.Verify" Label="Verify after backup" Color="Color.Primary" />
+            <MudTextField @bind-Value="_request.Description" Label="Description (optional)" />
+            @if (_messages.Count > 0)
+            {
+                <MudPaper Class="pa-2" Style="max-height:160px;overflow:auto;background:var(--psms-panel-2)">
+                    @foreach (var m in _messages)
+                    {
+                        <MudText Typo="Typo.caption" Style="font-family:var(--psms-mono)">@m</MudText>
+                    }
+                </MudPaper>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RunAsync" Disabled="_busy || string.IsNullOrWhiteSpace(_request.BackupPath)">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Backup
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public string Database { get; set; } = string.Empty;
+
+    private readonly BackupDatabaseRequest _request = new();
+    private readonly List<string> _messages = [];
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _request.Database = Database;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _request.BackupPath = await Admin.SuggestBackupPathAsync(Connection, password, Database);
+        }
+        catch
+        {
+            _request.BackupPath = $"/var/opt/mssql/data/{Database}.bak";
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task RunAsync()
+    {
+        _busy = true;
+        _messages.Clear();
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.BackupDatabaseAsync(Connection, password, _request);
+            _messages.AddRange(result.Messages);
+            if (result.Succeeded)
+            {
+                Snackbar.Add($"{result.Message} ({result.ElapsedMilliseconds} ms)", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add(result.Error ?? "Backup failed.", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

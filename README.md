@@ -36,12 +36,15 @@ dotnet run --project src/PSMS.App
 - Modern slate/teal dark shell with resizable Object Explorer and editor/results splitter
 - Save / edit / delete named SQL Server connections (encrypted passwords under `~/.config/psms` or `%AppData%\PSMS`)
 - Object Explorer: databases → schemas → tables / views / procedures / functions → columns
-- Context menus: New Query, Select Top 1000, Script as CREATE, Connect / Disconnect / Refresh
+- Context menus: New Query, Select Top 1000, Script as CREATE, Connect / Disconnect / Refresh,
+  Create Database, Backup, Restore, Open Admin
 - Query tabs with Monaco SQL editor, database dropdown, Open / Save `.sql`
 - **IntelliSense** (SSMS-style): tables, views, schemas, columns, procs/functions + keywords/snippets; `Ctrl+Space` or type / `.`
 - Execute (**F5** / Ctrl+Enter) with selection support; Cancel; `GO` batch splitting
 - Multiple result-set tabs, Messages pane, CSV export, 10k row soft cap
 - Status bar: connection, database, auth, IntelliSense object count, row count, elapsed, Ready/Executing
+- **SQL Server Admin** (toolbar **Admin**): Analysis (sessions + waits), create database, backup/restore with verify,
+  SQL Server Agent jobs (list / start / stop / enable / history) — T-SQL based so it works on Windows and Linux
 
 ## Solution layout
 

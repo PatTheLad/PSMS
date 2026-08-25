@@ -32,6 +32,11 @@
                    Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
+        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+        <MudButton Variant="@(Sessions.ShowAdminWorkspace ? Variant.Filled : Variant.Text)"
+                   Size="Size.Small" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.AdminPanelSettings"
+                   OnClick="ToggleAdmin">Admin</MudButton>
 
         <MudSpacer />
         <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">SQL Server</MudChip>
@@ -51,11 +56,18 @@
         </aside>
         <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
              @onmousedown="StartExplorerDrag"></div>
-        <section class="psms-main">
-            <QueryWorkspace @ref="_workspace" />
-            <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
-                 @onmousedown="StartEditorDrag"></div>
-            <ResultsPane />
+        <section class="psms-main @(Sessions.ShowAdminWorkspace ? "psms-main-admin" : null)">
+            @if (Sessions.ShowAdminWorkspace)
+            {
+                <AdminWorkspace />
+            }
+            else
+            {
+                <QueryWorkspace @ref="_workspace" />
+                <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
+                     @onmousedown="StartEditorDrag"></div>
+                <ResultsPane />
+            }
         </section>
     </div>
 
@@ -177,6 +189,18 @@
     }
 
     private void OpenSuggest() => _suggest?.Open();
+
+    private void ToggleAdmin()
+    {
+        if (Sessions.ShowAdminWorkspace)
+        {
+            Sessions.ShowQueries();
+        }
+        else
+        {
+            Sessions.ShowAdmin();
+        }
+    }
 
     private async Task StartExplorerDrag()
     {

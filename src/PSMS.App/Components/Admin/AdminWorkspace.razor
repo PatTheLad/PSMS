@@ -1,0 +1,175 @@
+@inject ActiveSessionService Sessions
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="psms-admin">
+    <div class="psms-admin-header">
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600">SQL Server Administration</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            @if (_connection is null)
+            {
+                <text>Connect a server in Object Explorer, then open Admin.</text>
+            }
+            else
+            {
+                <text>@_connection.Name · @_connection.Server</text>
+            }
+        </MudText>
+        <MudSpacer />
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
+                   Disabled="_busy || _connection is null" OnClick="RefreshAsync">Refresh</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Code"
+                   OnClick="BackToQueries">Queries</MudButton>
+    </div>
+
+    @if (_connection is null)
+    {
+        <div class="psms-empty" style="padding:2rem">
+            Connect to a SQL Server instance first, then click <strong>Admin</strong> in the toolbar.
+        </div>
+    }
+    else
+    {
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tab" Class="psms-admin-tabs">
+            <MudTabPanel Text="Analysis" Icon="@Icons.Material.Filled.Insights" Class="psms-admin-panel">
+                <AnalysisPanel Snapshot="_snapshot" Busy="_busy" />
+            </MudTabPanel>
+            <MudTabPanel Text="Databases" Icon="@Icons.Material.Filled.Storage" Class="psms-admin-panel">
+                <DatabasesAdminPanel Connection="_connection"
+                                    Databases="_snapshot?.Databases"
+                                    Busy="_busy"
+                                    OnChanged="RefreshAsync"
+                                    OnCreate="OpenCreateDb"
+                                    OnBackup="OpenBackup"
+                                    OnRestore="OpenRestore" />
+            </MudTabPanel>
+            <MudTabPanel Text="SQL Agent" Icon="@Icons.Material.Filled.Schedule" Class="psms-admin-panel">
+                <AgentJobsPanel Connection="_connection" Busy="_busy" OnStatusChanged="OnAgentTouched" />
+            </MudTabPanel>
+        </MudTabs>
+    }
+</div>
+
+@code {
+    private ConnectionDefinition? _connection;
+    private ServerAnalysisSnapshot? _snapshot;
+    private bool _busy;
+    private int _tab;
+
+    protected override void OnInitialized()
+    {
+        Sessions.Changed += OnSessionsChanged;
+        _ = LoadAsync();
+    }
+
+    private void OnSessionsChanged() => InvokeAsync(async () =>
+    {
+        var next = ResolveConnection();
+        if (next?.Id != _connection?.Id)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            StateHasChanged();
+        }
+    });
+
+    private ConnectionDefinition? ResolveConnection()
+        => Sessions.SelectedConnection
+           ?? Sessions.OpenConnections.FirstOrDefault();
+
+    private async Task LoadAsync()
+    {
+        _connection = ResolveConnection();
+        if (_connection is null)
+        {
+            _snapshot = null;
+            StateHasChanged();
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_connection is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var password = _connection.UseWindowsAuth ? null : Store.DecryptPassword(_connection);
+            _snapshot = await Admin.GetServerAnalysisAsync(_connection, password);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Admin refresh failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task OnAgentTouched() => RefreshAsync();
+
+    private void BackToQueries() => Sessions.ShowQueries();
+
+    private async Task OpenCreateDb()
+    {
+        if (_connection is null) return;
+        var parameters = new DialogParameters<CreateDatabaseDialog>
+        {
+            { x => x.Connection, _connection }
+        };
+        var dialog = await DialogService.ShowAsync<CreateDatabaseDialog>("Create database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshAsync();
+        }
+    }
+
+    private async Task OpenBackup(string database)
+    {
+        if (_connection is null) return;
+        var parameters = new DialogParameters<BackupDatabaseDialog>
+        {
+            { x => x.Connection, _connection },
+            { x => x.Database, database }
+        };
+        var dialog = await DialogService.ShowAsync<BackupDatabaseDialog>($"Backup — {database}", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshAsync();
+        }
+    }
+
+    private async Task OpenRestore(string? database)
+    {
+        if (_connection is null) return;
+        var parameters = new DialogParameters<RestoreDatabaseDialog>
+        {
+            { x => x.Connection, _connection },
+            { x => x.Database, database }
+        };
+        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await RefreshAsync();
+        }
+    }
+
+    public void Dispose() => Sessions.Changed -= OnSessionsChanged;
+}
