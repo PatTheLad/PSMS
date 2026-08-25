@@ -181,6 +181,11 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
             options.Add("COMPRESSION");
         }
 
+        if (request.Verify)
+        {
+            options.Add("CHECKSUM");
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Description))
         {
             options.Add($"DESCRIPTION = N'{EscapeLiteral(request.Description)}'");
@@ -489,10 +494,10 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
                         STUFF(STUFF(RIGHT('000000' + CONVERT(varchar(6), h.run_time), 6), 5, 0, ':'), 3, 0, ':'))
                 END AS last_run,
                 CASE
-                    WHEN s.next_run_date IS NULL OR s.next_run_date = 0 THEN NULL
+                    WHEN js.next_run_date IS NULL OR js.next_run_date = 0 THEN NULL
                     ELSE CONVERT(datetime,
-                        CONVERT(char(8), s.next_run_date) + ' ' +
-                        STUFF(STUFF(RIGHT('000000' + CONVERT(varchar(6), ISNULL(s.next_run_time, 0)), 6), 5, 0, ':'), 3, 0, ':'))
+                        CONVERT(char(8), js.next_run_date) + ' ' +
+                        STUFF(STUFF(RIGHT('000000' + CONVERT(varchar(6), ISNULL(js.next_run_time, 0)), 6), 5, 0, ':'), 3, 0, ':'))
                 END AS next_run,
                 ISNULL(j.description, N''),
                 (SELECT COUNT(*) FROM msdb.dbo.sysjobsteps st WHERE st.job_id = j.job_id)
