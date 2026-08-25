@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PSMS.App/PSMS.App.csproj" />
+    <Project Path="src/PSMS.Core/PSMS.Core.csproj" />
+    <Project Path="src/PSMS.Providers.SqlServer/PSMS.Providers.SqlServer.csproj" />
+  </Folder>
+</Solution>

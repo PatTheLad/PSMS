@@ -1,0 +1,137 @@
+@using System.Globalization
+@using System.Text
+@inject ActiveSessionService Sessions
+@inject IFileDialogService FileDialogs
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="psms-results-pane">
+    @if (Sessions.ActiveTab?.LastResult is null)
+    {
+        <div class="psms-empty">Results appear here after you execute a query (F5).</div>
+    }
+    else
+    {
+        var result = Sessions.ActiveTab.LastResult;
+        <div class="psms-tab-tools">
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download"
+                       Disabled="@(!result.HasResultSet)" OnClick="ExportCsvAsync">Export CSV</MudButton>
+            <MudSpacer />
+            <MudText Typo="Typo.caption">@result.ElapsedMilliseconds ms</MudText>
+        </div>
+
+        <MudTabs Elevation="0" Style="flex:1;min-height:0;height:100%">
+            @{
+                var setIndex = 0;
+            }
+            @foreach (var set in result.ResultSets)
+            {
+                var localIndex = setIndex++;
+                <MudTabPanel Text="@($"Results {localIndex + 1} ({set.Rows.Count})")">
+                    @if (set.Truncated)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="ma-1">Result truncated.</MudAlert>
+                    }
+                    <div style="flex:1;min-height:0;overflow:auto;height:100%">
+                        <MudSimpleTable Dense="true" Hover="true" Style="width:max-content;min-width:100%">
+                            <thead>
+                            <tr>
+                                @foreach (var col in set.Columns)
+                                {
+                                    <th>@col</th>
+                                }
+                            </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var row in set.Rows)
+                            {
+                                <tr>
+                                    @foreach (var cell in row)
+                                    {
+                                        <td>
+                                            @if (cell is null)
+                                            {
+                                                <span class="psms-null">NULL</span>
+                                            }
+                                            else
+                                            {
+                                                @FormatCell(cell)
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                            </tbody>
+                        </MudSimpleTable>
+                    </div>
+                </MudTabPanel>
+            }
+
+            <MudTabPanel Text="Messages">
+                <div class="psms-messages">
+                    @foreach (var message in result.Messages)
+                    {
+                        <div>@message</div>
+                    }
+                    @if (!string.IsNullOrEmpty(result.Error))
+                    {
+                        <div style="color: var(--psms-danger);">@result.Error</div>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Sessions.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Sessions.Changed -= OnChanged;
+
+    private static string FormatCell(object cell) =>
+        cell switch
+        {
+            DateTime dt => dt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            DateTimeOffset dto => dto.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            byte[] bytes => $"0x{Convert.ToHexString(bytes)}",
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => cell.ToString() ?? string.Empty
+        };
+
+    private async Task ExportCsvAsync()
+    {
+        var result = Sessions.ActiveTab?.LastResult;
+        if (result is null || result.ResultSets.Count == 0)
+        {
+            return;
+        }
+
+        // Export the first result set (primary grid).
+        var set = result.ResultSets[0];
+        var path = await FileDialogs.SaveCsvFileAsync("results.csv");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join(',', set.Columns.Select(EscapeCsv)));
+        foreach (var row in set.Rows)
+        {
+            sb.AppendLine(string.Join(',', row.Select(c => EscapeCsv(c is null ? string.Empty : FormatCell(c)))));
+        }
+
+        await File.WriteAllTextAsync(path, sb.ToString());
+        Snackbar.Add($"Exported to {path}", Severity.Success);
+    }
+
+    private static string EscapeCsv(string value)
+    {
+        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        }
+
+        return value;
+    }
+}

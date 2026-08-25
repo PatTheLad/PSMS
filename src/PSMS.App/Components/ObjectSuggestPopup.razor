@@ -1,0 +1,154 @@
+@inject ActiveSessionService Sessions
+@inject SchemaIntelliSenseService IntelliSense
+@inject EditorRegistry Editors
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@if (_open)
+{
+    <div class="psms-suggest-backdrop" @onclick="Close"></div>
+    <div class="psms-suggest-panel">
+        <div class="psms-suggest-header">
+            <MudText Typo="Typo.subtitle2">Insert object</MudText>
+            <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense"
+                          Placeholder="Filter tables, views, columns…" Class="mt-1" />
+        </div>
+        <div class="psms-suggest-list">
+            @foreach (var item in Filtered.Take(100))
+            {
+                <button type="button" class="psms-suggest-item" @onclick="@(() => InsertAsync(item))">
+                    <span class="kind">@item.Kind</span>
+                    <span class="name">@item.Display</span>
+                </button>
+            }
+            @if (!Filtered.Any())
+            {
+                <div class="psms-empty">No matches. Connect and refresh IntelliSense first.</div>
+            }
+        </div>
+        <div class="psms-suggest-footer">
+            <MudButton Size="Size.Small" OnClick="Close">Close</MudButton>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open;
+    private string _filter = string.Empty;
+    private List<SuggestItem> _items = [];
+
+    protected override void OnInitialized() => Sessions.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Open()
+    {
+        BuildItems();
+        _filter = string.Empty;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private void Close()
+    {
+        _open = false;
+        StateHasChanged();
+    }
+
+    private IEnumerable<SuggestItem> Filtered =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _items
+            : _items.Where(i => i.Display.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                                || i.Insert.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    private void BuildItems()
+    {
+        _items = [];
+        var snap = IntelliSense.Current;
+        var tab = Sessions.ActiveTab;
+        if (snap is null || tab is null
+            || snap.ConnectionId != tab.ConnectionId
+            || !string.Equals(snap.Database, tab.Database, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var db in snap.Databases)
+        {
+            _items.Add(new SuggestItem("Database", db, Quote(db)));
+        }
+
+        foreach (var obj in snap.Objects.Where(o => o.Kind != CatalogObjectKind.Column))
+        {
+            var db = obj.Database ?? snap.Database;
+            var display = obj.Kind == CatalogObjectKind.Schema
+                ? obj.Name
+                : string.Equals(db, snap.Database, StringComparison.OrdinalIgnoreCase)
+                    ? $"{obj.Schema}.{obj.Name}"
+                    : $"{db}.{obj.Schema}.{obj.Name}";
+
+            string insert;
+            if (obj.Kind == CatalogObjectKind.Schema)
+            {
+                insert = Quote(obj.Name);
+            }
+            else if (!string.Equals(db, snap.Database, StringComparison.OrdinalIgnoreCase))
+            {
+                insert = string.Equals(obj.Schema, "dbo", StringComparison.OrdinalIgnoreCase)
+                    ? $"{Quote(db)}..{Quote(obj.Name)}"
+                    : $"{Quote(db)}.{Quote(obj.Schema)}.{Quote(obj.Name)}";
+            }
+            else if (string.Equals(obj.Schema, "dbo", StringComparison.OrdinalIgnoreCase))
+            {
+                insert = Quote(obj.Name);
+            }
+            else
+            {
+                insert = $"{Quote(obj.Schema)}.{Quote(obj.Name)}";
+            }
+
+            _items.Add(new SuggestItem(obj.Kind.ToString(), display, insert));
+        }
+
+        foreach (var pair in snap.ColumnsByTable)
+        {
+            foreach (var col in pair.Value)
+            {
+                _items.Add(new SuggestItem("Column", $"{pair.Key}.{col.Name}", Quote(col.Name)));
+            }
+        }
+    }
+
+    private async Task InsertAsync(SuggestItem item)
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Close();
+            return;
+        }
+
+        var sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+        // Append with a space if needed
+        if (sql.Length > 0 && !char.IsWhiteSpace(sql[^1]) && !sql.EndsWith('.'))
+        {
+            sql += " ";
+        }
+
+        sql += item.Insert;
+        tab.Sql = sql;
+        await Editors.SetSqlAsync(tab.Id, sql);
+        tab.IsDirty = true;
+        Sessions.Notify();
+        Close();
+        Snackbar.Add($"Inserted {item.Display}", Severity.Info);
+    }
+
+    private static string Quote(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*$")
+            ? name
+            : $"[{name.Replace("]", "]]")}]";
+
+    private sealed record SuggestItem(string Kind, string Display, string Insert);
+
+    public void Dispose() => Sessions.Changed -= OnChanged;
+}

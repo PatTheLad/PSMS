@@ -1,0 +1,36 @@
+@inject ContextMenuService Menus
+@implements IDisposable
+
+@if (Menus.IsOpen)
+{
+    <div class="psms-ctx-backdrop" @onclick="Menus.Close" @oncontextmenu="Menus.Close" @oncontextmenu:preventDefault></div>
+    <div class="psms-ctx-menu" style="@($"left:{Menus.X}px;top:{Menus.Y}px")" @onclick:stopPropagation="true">
+        @foreach (var item in Menus.Items)
+        {
+            if (item.IsDivider)
+            {
+                <div class="psms-ctx-divider"></div>
+            }
+            else
+            {
+                <button type="button" class="psms-ctx-item" @onclick="@(() => InvokeAsync(item))">@item.Text</button>
+            }
+        }
+    </div>
+}
+
+@code {
+    protected override void OnInitialized() => Menus.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task InvokeAsync(ContextMenuItem item)
+    {
+        Menus.Close();
+        if (item.Action is not null)
+        {
+            await item.Action();
+        }
+    }
+
+    public void Dispose() => Menus.Changed -= OnChanged;
+}

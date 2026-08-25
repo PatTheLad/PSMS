@@ -1,0 +1,137 @@
+@using System.Runtime.InteropServices
+@inject IConnectionStore Store
+@inject IDbProviderFactory ProviderFactory
+@inject ActiveSessionService Sessions
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudTextField @bind-Value="_model.Name" Label="Connection name" Required="true" />
+            <MudTextField @bind-Value="_model.Server" Label="Server" Required="true" HelperText="e.g. localhost or .\SQLEXPRESS" />
+            <MudNumericField T="int?" @bind-Value="_model.Port" Label="Port (optional)" Min="1" Max="65535" />
+            <MudTextField @bind-Value="_model.Database" Label="Default database" HelperText="Optional; defaults to master" />
+            <MudSwitch @bind-Value="_model.UseWindowsAuth" Label="@AuthLabel" Color="Color.Primary" />
+            @if (!_model.UseWindowsAuth)
+            {
+                <MudTextField @bind-Value="_model.UserName" Label="Login" Required="true" />
+                <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password"
+                              HelperText="Leave blank when editing to keep the stored password" />
+            }
+            <MudSwitch @bind-Value="_model.Encrypt" Label="Encrypt" Color="Color.Primary" />
+            <MudSwitch @bind-Value="_model.TrustServerCertificate" Label="Trust server certificate" Color="Color.Primary" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="TestAsync" Disabled="_busy">Test</MudButton>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+
+    private ConnectionDefinition _model = new();
+    private string? _password;
+    private bool _busy;
+
+    private string AuthLabel => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        ? "Windows authentication"
+        : "Integrated authentication (Windows only — use SQL login on Linux/macOS)";
+
+    protected override void OnInitialized()
+    {
+        _model = new ConnectionDefinition
+        {
+            Id = Connection.Id,
+            Name = string.IsNullOrWhiteSpace(Connection.Name) ? "SQL Server" : Connection.Name,
+            Engine = DbEngine.SqlServer,
+            Server = Connection.Server,
+            Database = Connection.Database,
+            UseWindowsAuth = Connection.UseWindowsAuth && RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
+            UserName = Connection.UserName,
+            EncryptedPassword = Connection.EncryptedPassword,
+            Encrypt = Connection.Encrypt,
+            TrustServerCertificate = Connection.TrustServerCertificate,
+            Port = Connection.Port
+        };
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            _model.UseWindowsAuth = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task TestAsync()
+    {
+        _busy = true;
+        try
+        {
+            var password = ResolvePasswordForUse();
+            var provider = ProviderFactory.GetProvider(DbEngine.SqlServer);
+            await provider.TestConnectionAsync(_model, password);
+            Snackbar.Add("Connection succeeded.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Connection failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Name) || string.IsNullOrWhiteSpace(_model.Server))
+        {
+            Snackbar.Add("Name and server are required.", Severity.Warning);
+            return;
+        }
+
+        if (!_model.UseWindowsAuth && string.IsNullOrWhiteSpace(_model.UserName))
+        {
+            Snackbar.Add("Login is required for SQL authentication.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _model.Engine = DbEngine.SqlServer;
+            await Store.SaveAsync(_model, _model.UseWindowsAuth ? null : _password);
+            Sessions.NotifyConnectionsChanged();
+            Snackbar.Add("Connection saved.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(_model));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string? ResolvePasswordForUse()
+    {
+        if (_model.UseWindowsAuth)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(_password))
+        {
+            return _password;
+        }
+
+        return Store.DecryptPassword(_model);
+    }
+}

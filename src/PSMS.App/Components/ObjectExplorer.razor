@@ -1,0 +1,635 @@
+@inject IConnectionStore Store
+@inject IDbProviderFactory ProviderFactory
+@inject ActiveSessionService Sessions
+@inject SchemaIntelliSenseService IntelliSense
+@inject ContextMenuService Menus
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="psms-filter">
+    <div class="psms-filter-title">
+        <MudText Typo="Typo.subtitle2">Object Explorer</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="ReloadAsync" aria-label="Refresh" />
+        <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="RequestNew" aria-label="New connection" />
+    </div>
+    <MudTextField @bind-Value="_filter"
+                  Immediate="true"
+                  Margin="Margin.Dense"
+                  Variant="Variant.Outlined"
+                  Placeholder="Filter connections…"
+                  Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  Class="psms-filter-input" />
+</div>
+
+<div class="psms-explorer-scroll" @oncontextmenu:preventDefault="true">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mb-2" />
+    }
+
+    @if (FilteredConnections.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="psms-empty">No saved connections. Click + to add one.</MudText>
+    }
+    else
+    {
+        <MudTreeView T="string" Dense="true" Class="psms-tree">
+            @foreach (var connection in FilteredConnections)
+            {
+                var connKey = $"c:{connection.Id}";
+                <MudTreeViewItem Value="@connKey"
+                                 Icon="@Icons.Material.Filled.Storage"
+                                 Expanded="@_expanded.Contains(connKey)"
+                                 ExpandedChanged="@(e => _ = OnConnectionExpanded(connection, e))">
+                    <BodyContent>
+                        <div class="psms-node-label @(Sessions.IsConnected(connection.Id) ? "connected" : null)"
+                             @oncontextmenu="@(e => OpenConnectionMenu(e, connection))"
+                             @oncontextmenu:preventDefault="true"
+                             @oncontextmenu:stopPropagation="true">
+                            @connection.Name
+                        </div>
+                    </BodyContent>
+                    <ChildContent>
+                        @if (_connecting.Contains(connection.Id))
+                        {
+                            <MudTreeViewItem Value="@($"wait:{connection.Id}")" Text="Connecting…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                        }
+                        else if (_databases.TryGetValue(connection.Id, out var databases))
+                        {
+                            @foreach (var db in databases.Where(d => PassesFilter(d.Name)))
+                            {
+                                var dbKey = $"d:{connection.Id}:{db.Name}";
+                                <MudTreeViewItem Value="@dbKey"
+                                                 Icon="@Icons.Material.Filled.Dataset"
+                                                 Expanded="@_expanded.Contains(dbKey)"
+                                                 ExpandedChanged="@(e => _ = OnDatabaseExpanded(connection, db.Name, e))">
+                                    <BodyContent>
+                                        <div class="psms-node-label"
+                                             @oncontextmenu="@(e => OpenDatabaseMenu(e, connection, db.Name))"
+                                             @oncontextmenu:preventDefault="true"
+                                             @oncontextmenu:stopPropagation="true">
+                                            @db.Name
+                                        </div>
+                                    </BodyContent>
+                                    <ChildContent>
+                                        @if (_loadingNodes.Contains(dbKey))
+                                        {
+                                            <MudTreeViewItem Value="@($"wait:{dbKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                        }
+                                        else if (_schemas.TryGetValue(Key(connection.Id, db.Name), out var schemas))
+                                        {
+                                            @foreach (var schema in schemas.Where(s => PassesFilter(s.Name)))
+                                            {
+                                                var schemaKey = $"s:{connection.Id}:{db.Name}:{schema.Name}";
+                                                <MudTreeViewItem Value="@schemaKey"
+                                                                 Icon="@Icons.Material.Filled.Folder"
+                                                                 Text="@schema.Name"
+                                                                 Expanded="@_expanded.Contains(schemaKey)"
+                                                                 ExpandedChanged="@(e => _ = OnSchemaExpanded(connection, db.Name, schema.Name, e))">
+                                                    <ChildContent>
+                                                        @if (_loadingNodes.Contains(schemaKey))
+                                                        {
+                                                            <MudTreeViewItem Value="@($"wait:{schemaKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                                        }
+                                                        else if (_tables.TryGetValue(Key(connection.Id, db.Name, schema.Name), out var tables))
+                                                        {
+                                                            <MudTreeViewItem Value="@($"tfold:{schemaKey}")" Text="Tables" Icon="@Icons.Material.Filled.TableView" Expanded="true">
+                                                                <ChildContent>
+                                                                    @foreach (var table in tables.Where(t => PassesFilter(t.Name)))
+                                                                    {
+                                                                        var tableKey = $"t:{connection.Id}:{db.Name}:{schema.Name}:{table.Name}";
+                                                                        <MudTreeViewItem Value="@tableKey"
+                                                                                         Icon="@Icons.Material.Filled.TableChart"
+                                                                                         Expanded="@_expanded.Contains(tableKey)"
+                                                                                         ExpandedChanged="@(e => _ = OnTableExpanded(connection, db.Name, schema.Name, table.Name, e))">
+                                                                            <BodyContent>
+                                                                                <div class="psms-node-label"
+                                                                                     @oncontextmenu="@(e => OpenTableMenu(e, connection, db.Name, schema.Name, table.Name))"
+                                                                                     @oncontextmenu:preventDefault="true"
+                                                                                     @oncontextmenu:stopPropagation="true">
+                                                                                    @table.Name
+                                                                                </div>
+                                                                            </BodyContent>
+                                                                            <ChildContent>
+                                                                                @if (_loadingNodes.Contains(tableKey))
+                                                                                {
+                                                                                    <MudTreeViewItem Value="@($"wait:{tableKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                                                                }
+                                                                                else if (_columns.TryGetValue(Key(connection.Id, db.Name, schema.Name, table.Name), out var columns))
+                                                                                {
+                                                                                    @foreach (var col in columns)
+                                                                                    {
+                                                                                        <MudTreeViewItem Value="@($"col:{tableKey}:{col.Name}")"
+                                                                                                         Text="@($"{col.Name} ({col.DataType})")"
+                                                                                                         Icon="@Icons.Material.Filled.ViewColumn" />
+                                                                                    }
+                                                                                }
+                                                                                else
+                                                                                {
+                                                                                    <MudTreeViewItem Value="@($"ph:{tableKey}")" Text="…" />
+                                                                                }
+                                                                            </ChildContent>
+                                                                        </MudTreeViewItem>
+                                                                    }
+                                                                </ChildContent>
+                                                            </MudTreeViewItem>
+
+                                                            @if (_views.TryGetValue(Key(connection.Id, db.Name, schema.Name), out var views))
+                                                            {
+                                                                <MudTreeViewItem Value="@($"vfold:{schemaKey}")" Text="Views" Icon="@Icons.Material.Filled.Visibility" Expanded="true">
+                                                                    <ChildContent>
+                                                                        @foreach (var view in views.Where(v => PassesFilter(v.Name)))
+                                                                        {
+                                                                            <MudTreeViewItem Value="@($"v:{schemaKey}:{view.Name}")" Icon="@Icons.Material.Filled.Visibility">
+                                                                                <BodyContent>
+                                                                                    <div class="psms-node-label"
+                                                                                         @oncontextmenu="@(e => OpenViewMenu(e, connection, db.Name, schema.Name, view.Name))"
+                                                                                         @oncontextmenu:preventDefault="true"
+                                                                                         @oncontextmenu:stopPropagation="true">
+                                                                                        @view.Name
+                                                                                    </div>
+                                                                                </BodyContent>
+                                                                            </MudTreeViewItem>
+                                                                        }
+                                                                    </ChildContent>
+                                                                </MudTreeViewItem>
+                                                            }
+
+                                                            @if (_procs.TryGetValue(Key(connection.Id, db.Name, schema.Name), out var procs))
+                                                            {
+                                                                <MudTreeViewItem Value="@($"pfold:{schemaKey}")" Text="Stored Procedures" Icon="@Icons.Material.Filled.Functions" Expanded="true">
+                                                                    <ChildContent>
+                                                                        @foreach (var proc in procs.Where(p => PassesFilter(p.Name)))
+                                                                        {
+                                                                            <MudTreeViewItem Value="@($"p:{schemaKey}:{proc.Name}")" Icon="@Icons.Material.Filled.SettingsEthernet">
+                                                                                <BodyContent>
+                                                                                    <div class="psms-node-label"
+                                                                                         @oncontextmenu="@(e => OpenProcMenu(e, connection, db.Name, schema.Name, proc.Name))"
+                                                                                         @oncontextmenu:preventDefault="true"
+                                                                                         @oncontextmenu:stopPropagation="true">
+                                                                                        @proc.Name
+                                                                                    </div>
+                                                                                </BodyContent>
+                                                                            </MudTreeViewItem>
+                                                                        }
+                                                                    </ChildContent>
+                                                                </MudTreeViewItem>
+                                                            }
+
+                                                            @if (_funcs.TryGetValue(Key(connection.Id, db.Name, schema.Name), out var funcs))
+                                                            {
+                                                                <MudTreeViewItem Value="@($"ffold:{schemaKey}")" Text="Functions" Icon="@Icons.Material.Filled.Code" Expanded="true">
+                                                                    <ChildContent>
+                                                                        @foreach (var func in funcs.Where(f => PassesFilter(f.Name)))
+                                                                        {
+                                                                            <MudTreeViewItem Value="@($"f:{schemaKey}:{func.Name}")" Icon="@Icons.Material.Filled.Code">
+                                                                                <BodyContent>
+                                                                                    <div class="psms-node-label"
+                                                                                         @oncontextmenu="@(e => OpenFuncMenu(e, connection, db.Name, schema.Name, func.Name))"
+                                                                                         @oncontextmenu:preventDefault="true"
+                                                                                         @oncontextmenu:stopPropagation="true">
+                                                                                        @func.Name
+                                                                                    </div>
+                                                                                </BodyContent>
+                                                                            </MudTreeViewItem>
+                                                                        }
+                                                                    </ChildContent>
+                                                                </MudTreeViewItem>
+                                                            }
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudTreeViewItem Value="@($"ph:{schemaKey}")" Text="…" />
+                                                        }
+                                                    </ChildContent>
+                                                </MudTreeViewItem>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <MudTreeViewItem Value="@($"ph:{dbKey}")" Text="…" />
+                                        }
+                                    </ChildContent>
+                                </MudTreeViewItem>
+                            }
+                        }
+                        else
+                        {
+                            <MudTreeViewItem Value="@($"ph:c:{connection.Id}")" Text="…" />
+                        }
+                    </ChildContent>
+                </MudTreeViewItem>
+            }
+        </MudTreeView>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string? Sql, string? Title)> OnOpenQuery { get; set; }
+    [Parameter] public EventCallback<ConnectionDefinition> OnEditConnection { get; set; }
+    [Parameter] public EventCallback OnRequestNewConnection { get; set; }
+
+    private readonly List<ConnectionDefinition> _connections = [];
+    private readonly Dictionary<Guid, List<DatabaseInfo>> _databases = new();
+    private readonly Dictionary<string, List<SchemaInfo>> _schemas = new();
+    private readonly Dictionary<string, List<TableInfo>> _tables = new();
+    private readonly Dictionary<string, List<ViewInfo>> _views = new();
+    private readonly Dictionary<string, List<ProcedureInfo>> _procs = new();
+    private readonly Dictionary<string, List<FunctionInfo>> _funcs = new();
+    private readonly Dictionary<string, List<ColumnInfo>> _columns = new();
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _loadingNodes = new(StringComparer.Ordinal);
+    private readonly HashSet<Guid> _connecting = [];
+    private bool _loading;
+    private string _filter = string.Empty;
+
+    private IReadOnlyList<ConnectionDefinition> FilteredConnections =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _connections
+            : _connections.Where(c =>
+                c.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || c.Server.Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private bool PassesFilter(string name) =>
+        string.IsNullOrWhiteSpace(_filter) || name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Sessions.Changed += OnSessionsChanged;
+        Sessions.ConnectionsChanged += OnConnectionsChanged;
+        await ReloadAsync();
+    }
+
+    private void OnSessionsChanged() => InvokeAsync(StateHasChanged);
+    private void OnConnectionsChanged() => InvokeAsync(ReloadAsync);
+
+    public async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var previous = _databases.ToDictionary(kv => kv.Key, kv => kv.Value);
+            _connections.Clear();
+            _connections.AddRange(await Store.GetAllAsync());
+            var ids = _connections.Select(c => c.Id).ToHashSet();
+            _databases.Clear();
+            foreach (var pair in previous.Where(p => ids.Contains(p.Key)))
+            {
+                _databases[pair.Key] = pair.Value;
+            }
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task RequestNew() => OnRequestNewConnection.InvokeAsync();
+
+    private void OpenConnectionMenu(MouseEventArgs e, ConnectionDefinition connection)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Connect", Action = () => EnsureConnectedAsync(connection, expand: true) },
+            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, connection.Database ?? "master") },
+            new ContextMenuItem { IsDivider = true, Text = "-" },
+            new ContextMenuItem { Text = "Refresh", Action = () => RefreshConnectionAsync(connection) },
+            new ContextMenuItem { Text = "Disconnect", Action = () => { Disconnect(connection); return Task.CompletedTask; } },
+            new ContextMenuItem { Text = "Edit", Action = async () => await OnEditConnection.InvokeAsync(connection) },
+            new ContextMenuItem { Text = "Delete", Action = () => DeleteAsync(connection) }
+        ]);
+    }
+
+    private void OpenDatabaseMenu(MouseEventArgs e, ConnectionDefinition connection, string database)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) },
+            new ContextMenuItem { Text = "Refresh", Action = () => LoadSchemasAsync(connection, database, force: true) }
+        ]);
+    }
+
+    private void OpenTableMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string table)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Select Top 1000", Action = () => SelectTop1000(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptTableAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) }
+        ]);
+    }
+
+    private void OpenViewMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string view)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Select Top 1000", Action = () => SelectTop1000(connection, database, schema, view) },
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, view, "View") }
+        ]);
+    }
+
+    private void OpenProcMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string proc)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, proc, "Procedure") },
+            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database, $"EXEC [{schema}].[{proc}];", proc) }
+        ]);
+    }
+
+    private void OpenFuncMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string func)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, func, "Function") }
+        ]);
+    }
+
+    private async Task OnConnectionExpanded(ConnectionDefinition connection, bool expanded)
+    {
+        var key = $"c:{connection.Id}";
+        if (expanded)
+        {
+            _expanded.Add(key);
+            await EnsureConnectedAsync(connection, expand: true);
+        }
+        else
+        {
+            _expanded.Remove(key);
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnDatabaseExpanded(ConnectionDefinition connection, string database, bool expanded)
+    {
+        var key = $"d:{connection.Id}:{database}";
+        if (expanded)
+        {
+            _expanded.Add(key);
+            await LoadSchemasAsync(connection, database);
+        }
+        else
+        {
+            _expanded.Remove(key);
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSchemaExpanded(ConnectionDefinition connection, string database, string schema, bool expanded)
+    {
+        var key = $"s:{connection.Id}:{database}:{schema}";
+        if (expanded)
+        {
+            _expanded.Add(key);
+            await LoadObjectsAsync(connection, database, schema);
+        }
+        else
+        {
+            _expanded.Remove(key);
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnTableExpanded(ConnectionDefinition connection, string database, string schema, string table, bool expanded)
+    {
+        var key = $"t:{connection.Id}:{database}:{schema}:{table}";
+        if (expanded)
+        {
+            _expanded.Add(key);
+            await LoadColumnsAsync(connection, database, schema, table);
+        }
+        else
+        {
+            _expanded.Remove(key);
+            StateHasChanged();
+        }
+    }
+
+    private async Task EnsureConnectedAsync(ConnectionDefinition connection, bool expand = false)
+    {
+        Sessions.SelectConnection(connection.Id);
+        if (expand)
+        {
+            _expanded.Add($"c:{connection.Id}");
+        }
+
+        if (Sessions.IsConnected(connection.Id) && _databases.ContainsKey(connection.Id))
+        {
+            StateHasChanged();
+            return;
+        }
+
+        _connecting.Add(connection.Id);
+        StateHasChanged();
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            await provider.TestConnectionAsync(connection, password);
+            var databases = await provider.GetDatabasesAsync(connection, password);
+            _databases[connection.Id] = databases.ToList();
+            Sessions.MarkConnected(connection);
+            var defaultDb = connection.Database ?? databases.FirstOrDefault()?.Name ?? "master";
+            Snackbar.Add($"Connected to {connection.Name}. Loading IntelliSense…", Severity.Info);
+            var snap = await IntelliSense.EnsureAsync(connection, defaultDb);
+            if (snap?.Status.StartsWith("Error") == true)
+            {
+                Snackbar.Add(snap.Status, Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add(
+                    $"IntelliSense ready — {snap?.Databases.Count:N0} databases, {snap?.TableCount:N0} tables/views.",
+                    Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            _expanded.Remove($"c:{connection.Id}");
+            Snackbar.Add($"Connect failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _connecting.Remove(connection.Id);
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshConnectionAsync(ConnectionDefinition connection)
+    {
+        _databases.Remove(connection.Id);
+        IntelliSense.Invalidate(connection.Id);
+        await EnsureConnectedAsync(connection, expand: true);
+    }
+
+    private void Disconnect(ConnectionDefinition connection)
+    {
+        Sessions.MarkDisconnected(connection.Id);
+        IntelliSense.Invalidate(connection.Id);
+        _databases.Remove(connection.Id);
+        _expanded.Remove($"c:{connection.Id}");
+        StateHasChanged();
+    }
+
+    private async Task LoadSchemasAsync(ConnectionDefinition connection, string database, bool force = false)
+    {
+        var key = Key(connection.Id, database);
+        var nodeKey = $"d:{connection.Id}:{database}";
+        if (!force && _schemas.ContainsKey(key))
+        {
+            StateHasChanged();
+            return;
+        }
+
+        _loadingNodes.Add(nodeKey);
+        StateHasChanged();
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            _schemas[key] = (await provider.GetSchemasAsync(connection, password, database)).ToList();
+            _ = IntelliSense.EnsureAsync(connection, database);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loadingNodes.Remove(nodeKey);
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadObjectsAsync(ConnectionDefinition connection, string database, string schema)
+    {
+        var key = Key(connection.Id, database, schema);
+        var nodeKey = $"s:{connection.Id}:{database}:{schema}";
+        if (_tables.ContainsKey(key))
+        {
+            StateHasChanged();
+            return;
+        }
+
+        _loadingNodes.Add(nodeKey);
+        StateHasChanged();
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            _tables[key] = (await provider.GetTablesAsync(connection, password, database, schema)).ToList();
+            _views[key] = (await provider.GetViewsAsync(connection, password, database, schema)).ToList();
+            _procs[key] = (await provider.GetProceduresAsync(connection, password, database, schema)).ToList();
+            _funcs[key] = (await provider.GetFunctionsAsync(connection, password, database, schema)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loadingNodes.Remove(nodeKey);
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadColumnsAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        var key = Key(connection.Id, database, schema, table);
+        var nodeKey = $"t:{connection.Id}:{database}:{schema}:{table}";
+        if (_columns.ContainsKey(key))
+        {
+            StateHasChanged();
+            return;
+        }
+
+        _loadingNodes.Add(nodeKey);
+        StateHasChanged();
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            _columns[key] = (await provider.GetColumnsAsync(connection, password, database, schema, table)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loadingNodes.Remove(nodeKey);
+            StateHasChanged();
+        }
+    }
+
+    private Task NewQuery(ConnectionDefinition connection, string database, string? sql = null, string? title = null)
+    {
+        Sessions.MarkConnected(connection);
+        _ = IntelliSense.EnsureAsync(connection, database);
+        return OnOpenQuery.InvokeAsync((connection, database, sql, title));
+    }
+
+    private Task SelectTop1000(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        var sql = $"SELECT TOP (1000) *{System.Environment.NewLine}FROM [{schema}].[{table}];";
+        return NewQuery(connection, database, sql, $"{schema}.{table}");
+    }
+
+    private async Task ScriptTableAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            var sql = await provider.ScriptCreateTableAsync(connection, password, database, schema, table);
+            await NewQuery(connection, database, sql, $"CREATE {schema}.{table}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task ScriptObjectAsync(ConnectionDefinition connection, string database, string schema, string name, string kind)
+    {
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            var sql = await provider.GetObjectDefinitionAsync(connection, password, database, schema, name);
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                Snackbar.Add($"No definition returned for {kind} [{schema}].[{name}].", Severity.Warning);
+                return;
+            }
+
+            await NewQuery(connection, database, sql, $"{kind} {schema}.{name}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteAsync(ConnectionDefinition connection)
+    {
+        await Store.DeleteAsync(connection.Id);
+        Sessions.MarkDisconnected(connection.Id);
+        IntelliSense.Invalidate(connection.Id);
+        Sessions.NotifyConnectionsChanged();
+        Snackbar.Add("Connection deleted.", Severity.Info);
+    }
+
+    private static string Key(Guid connectionId, params string[] parts)
+        => string.Join(':', new[] { connectionId.ToString() }.Concat(parts));
+
+    public void Dispose()
+    {
+        Sessions.Changed -= OnSessionsChanged;
+        Sessions.ConnectionsChanged -= OnConnectionsChanged;
+    }
+}

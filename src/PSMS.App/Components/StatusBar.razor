@@ -1,0 +1,81 @@
+@inject ActiveSessionService Sessions
+@inject SchemaIntelliSenseService IntelliSense
+@implements IDisposable
+
+<div class="psms-status">
+    @if (Sessions.ActiveTab?.IsExecuting == true)
+    {
+        <span class="busy">Executing…</span>
+    }
+    else
+    {
+        <span class="ready">Ready</span>
+    }
+
+    @if (ActiveConnection is { } conn)
+    {
+        <span title="@($"{conn.Name} · {conn.Server}")"><strong>@conn.Name</strong> · @conn.Server</span>
+        <span>DB: <strong>@(Sessions.ActiveTab?.Database ?? conn.Database ?? "master")</strong></span>
+    }
+    else
+    {
+        <span>Not connected</span>
+    }
+
+    @if (IntelliSense.Current is { } snap
+         && (Sessions.ActiveTab is null
+             || (snap.ConnectionId == Sessions.ActiveTab.ConnectionId
+                 && string.Equals(snap.Database, Sessions.ActiveTab.Database, StringComparison.OrdinalIgnoreCase))))
+    {
+        @if (snap.Status.StartsWith("Loading", StringComparison.OrdinalIgnoreCase))
+        {
+            <span title="Loading IntelliSense catalog">IS: <strong>Loading…</strong></span>
+        }
+        else if (!snap.Status.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            <span title="@($"{snap.Databases.Count:N0} databases · {snap.TableCount:N0} tables/views")">
+                IS: <strong>@snap.Databases.Count.ToString("N0")</strong> DB /
+                <strong>@snap.TableCount.ToString("N0")</strong> tables
+            </span>
+        }
+    }
+
+    <MudSpacer />
+
+    @if (Sessions.ActiveTab?.LastResult is { } result)
+    {
+        <span>Rows: <strong>@result.ResultSets.Sum(r => r.Rows.Count).ToString("N0")</strong></span>
+        <span>@result.ElapsedMilliseconds ms</span>
+    }
+</div>
+
+@code {
+    private ConnectionDefinition? ActiveConnection
+    {
+        get
+        {
+            var tab = Sessions.ActiveTab;
+            if (tab is not null)
+            {
+                return Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+                       ?? Sessions.SelectedConnection;
+            }
+
+            return Sessions.SelectedConnection;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Sessions.Changed += OnChanged;
+        IntelliSense.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Sessions.Changed -= OnChanged;
+        IntelliSense.Changed -= OnChanged;
+    }
+}

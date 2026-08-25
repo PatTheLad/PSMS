@@ -1,0 +1,409 @@
+:root {
+    --psms-bg: #0f1419;
+    --psms-panel: #161b22;
+    --psms-panel-2: #1c2330;
+    --psms-border: #2a3441;
+    --psms-text: #e6edf3;
+    --psms-muted: #8b9bb0;
+    --psms-accent: #2dd4bf;
+    --psms-danger: #f87171;
+    --psms-null: #6b7c93;
+    --psms-font: "IBM Plex Sans", "Segoe UI", sans-serif;
+    --psms-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    font-family: var(--psms-font);
+    background: var(--psms-bg);
+    color: var(--psms-text);
+}
+
+#app, app {
+    display: block;
+    height: 100%;
+    overflow: hidden;
+}
+
+.psms-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+    background: var(--psms-bg);
+}
+
+.psms-toolbar {
+    background: var(--psms-panel) !important;
+    border-bottom: 1px solid var(--psms-border);
+    min-height: 44px;
+    max-height: 52px;
+    overflow: hidden;
+    flex-wrap: nowrap !important;
+}
+
+.psms-toolbar .mud-toolbar-appbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap !important;
+}
+
+.psms-toolbar .mud-button-root {
+    text-transform: none;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.psms-body {
+    display: grid;
+    grid-template-columns: minmax(180px, var(--explorer-width, 280px)) 5px minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+.psms-explorer {
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--psms-panel);
+    display: flex;
+    flex-direction: column;
+}
+
+.psms-vsplit {
+    cursor: col-resize;
+    background: var(--psms-border);
+}
+
+.psms-vsplit:hover,
+.psms-vsplit.active {
+    background: var(--psms-accent);
+}
+
+.psms-main {
+    display: grid;
+    grid-template-rows: minmax(100px, var(--editor-ratio, 55%)) 5px minmax(100px, 1fr);
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--psms-bg);
+}
+
+.psms-hsplit {
+    cursor: row-resize;
+    background: var(--psms-border);
+}
+
+.psms-hsplit:hover,
+.psms-hsplit.active {
+    background: var(--psms-accent);
+}
+
+.psms-editor-pane,
+.psms-results-pane {
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--psms-panel-2);
+}
+
+.psms-editor-pane .mud-tabs,
+.psms-results-pane .mud-tabs,
+.psms-editor-pane .mud-tabs-panels,
+.psms-results-pane .mud-tabs-panels,
+.psms-editor-pane .mud-tab-panel,
+.psms-results-pane .mud-tab-panel {
+    display: flex !important;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+.psms-editor-pane .mud-tabs-toolbar,
+.psms-results-pane .mud-tabs-toolbar {
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.monaco-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+.psms-tab-tools {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--psms-border);
+    background: var(--psms-panel);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.psms-tab-tools .mud-input-control {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+.psms-empty {
+    padding: 1.25rem;
+    color: var(--psms-muted);
+}
+
+.psms-messages {
+    font-family: var(--psms-mono);
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    padding: 0.75rem 1rem;
+    overflow: auto;
+    height: 100%;
+    min-height: 0;
+    color: var(--psms-text);
+}
+
+.psms-null {
+    color: var(--psms-null);
+    font-style: italic;
+}
+
+.psms-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0 0.75rem;
+    height: 28px;
+    max-height: 28px;
+    font-size: 0.75rem;
+    background: var(--psms-panel);
+    border-top: 1px solid var(--psms-border);
+    color: var(--psms-muted);
+    overflow: hidden;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.psms-status > span {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.psms-status strong {
+    color: var(--psms-text);
+    font-weight: 500;
+}
+
+.psms-status .ready {
+    color: var(--psms-accent);
+}
+
+.psms-status .busy {
+    color: #fbbf24;
+}
+
+.psms-filter {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.6rem 0.6rem 0.7rem;
+    border-bottom: 1px solid var(--psms-border);
+    background: var(--psms-panel);
+    position: relative;
+    z-index: 2;
+}
+
+.psms-filter-title {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 32px;
+    flex: 0 0 auto;
+}
+
+.psms-filter-input {
+    flex: 0 0 auto;
+}
+
+.psms-filter .mud-input-control {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+.psms-filter .mud-input-slot,
+.psms-filter .mud-input {
+    min-height: 36px;
+}
+
+.psms-explorer-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.25rem 0.35rem 0.75rem;
+}
+
+.psms-node-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 4px;
+    border-radius: 4px;
+    user-select: none;
+}
+
+.psms-node-label.connected {
+    color: var(--psms-accent);
+}
+
+.psms-tree .mud-treeview-item-content {
+    min-width: 0;
+}
+
+.mud-table {
+    background: transparent !important;
+}
+
+.monaco-editor .suggest-widget {
+    border: 1px solid var(--psms-border) !important;
+    border-radius: 6px !important;
+}
+
+.monaco-editor .suggest-widget .monaco-list-row.focused {
+    background-color: rgba(45, 212, 191, 0.18) !important;
+}
+
+.psms-ctx-backdrop,
+.psms-suggest-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: transparent;
+}
+
+.psms-ctx-menu {
+    position: fixed;
+    z-index: 2001;
+    min-width: 180px;
+    max-width: 280px;
+    padding: 4px;
+    background: #1c2330;
+    border: 1px solid var(--psms-border);
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.psms-ctx-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    color: var(--psms-text);
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.psms-ctx-item:hover {
+    background: rgba(45, 212, 191, 0.16);
+}
+
+.psms-ctx-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--psms-border);
+}
+
+.psms-suggest-panel {
+    position: fixed;
+    z-index: 2001;
+    left: 50%;
+    top: 18%;
+    transform: translateX(-50%);
+    width: min(520px, 90vw);
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    background: #161b22;
+    border: 1px solid var(--psms-border);
+    border-radius: 10px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.psms-suggest-header,
+.psms-suggest-footer {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--psms-border);
+}
+
+.psms-suggest-footer {
+    border-bottom: 0;
+    border-top: 1px solid var(--psms-border);
+}
+
+.psms-suggest-list {
+    overflow: auto;
+    min-height: 0;
+    flex: 1;
+    padding: 0.35rem;
+}
+
+.psms-suggest-item {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--psms-text);
+    font: inherit;
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.psms-suggest-item:hover {
+    background: rgba(45, 212, 191, 0.14);
+}
+
+.psms-suggest-item .kind {
+    color: var(--psms-accent);
+    font-size: 0.72rem;
+    min-width: 72px;
+}
+
+.psms-suggest-item .name {
+    font-family: var(--psms-mono);
+    font-size: 0.82rem;
+}
+
+/* Monaco catalog highlighting */
+.monaco-editor .psms-hl-table {
+    color: #e5c07b !important;
+}
+
+.monaco-editor .psms-hl-db {
+    color: #56b6c2 !important;
+}

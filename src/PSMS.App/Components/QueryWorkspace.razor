@@ -1,0 +1,247 @@
+@inject ActiveSessionService Sessions
+@inject QueryRunner QueryRunner
+@inject IConnectionStore Store
+@inject IDbProviderFactory ProviderFactory
+@inject ISnackbar Snackbar
+@inject EditorRegistry Editors
+@inject SchemaIntelliSenseService IntelliSense
+@implements IDisposable
+
+<div class="psms-editor-pane">
+    @if (Sessions.Tabs.Count == 0)
+    {
+        <div class="psms-empty">
+            Connect to a server, then use <strong>New Query</strong> or right-click a database / table in Object Explorer.
+        </div>
+    }
+    else
+    {
+        <div class="psms-tab-tools">
+            <MudText Typo="Typo.caption" Class="mr-2">Database</MudText>
+            <MudSelect T="string" Dense="true" Margin="Margin.Dense" Style="max-width:220px"
+                       Value="Sessions.ActiveTab?.Database"
+                       ValueChanged="OnDatabaseChanged"
+                       Disabled="@(Sessions.ActiveTab is null)">
+                @foreach (var db in _databases)
+                {
+                    <MudSelectItem Value="@db">@db</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTooltip Text="Refresh IntelliSense catalog for this database">
+                <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small"
+                               OnClick="RefreshIntelliSenseAsync" aria-label="Refresh IntelliSense" />
+            </MudTooltip>
+            <MudText Typo="Typo.caption" Style="opacity:.65">Ctrl+Space</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="CloseActive">Close tab</MudButton>
+        </div>
+
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
+                 @bind-ActivePanelIndex="_activeIndex"
+                 Style="flex:1;min-height:0;height:100%">
+            @foreach (var tab in Sessions.Tabs)
+            {
+                <MudTabPanel Text="@(tab.IsDirty ? tab.Title + " *" : tab.Title)">
+                    <QueryEditorPane @key="tab.Id" Tab="tab" />
+                </MudTabPanel>
+            }
+        </MudTabs>
+    }
+</div>
+
+@code {
+    private int _activeIndex;
+    private int _lastIndex = -1;
+    private List<string> _databases = ["master"];
+
+    protected override void OnInitialized()
+    {
+        Sessions.Changed += OnSessionsChanged;
+        SyncActiveIndex();
+        _ = RefreshDatabasesAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_lastIndex != _activeIndex && _activeIndex >= 0 && _activeIndex < Sessions.Tabs.Count)
+        {
+            _lastIndex = _activeIndex;
+            Sessions.ActivateTab(Sessions.Tabs[_activeIndex].Id);
+            _ = RefreshDatabasesAsync();
+        }
+    }
+
+    private void OnSessionsChanged()
+    {
+        SyncActiveIndex();
+        InvokeAsync(async () =>
+        {
+            await RefreshDatabasesAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void SyncActiveIndex()
+    {
+        if (Sessions.ActiveTabId is null)
+        {
+            _activeIndex = 0;
+            return;
+        }
+
+        var index = Sessions.Tabs.ToList().FindIndex(t => t.Id == Sessions.ActiveTabId);
+        if (index >= 0)
+        {
+            _activeIndex = index;
+        }
+    }
+
+    private async Task RefreshDatabasesAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            _databases = ["master"];
+            return;
+        }
+
+        var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+                         ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == tab.ConnectionId);
+        if (connection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            var dbs = await provider.GetDatabasesAsync(connection, password);
+            _databases = dbs.Select(d => d.Name).ToList();
+            if (!_databases.Contains(tab.Database) && !string.IsNullOrWhiteSpace(tab.Database))
+            {
+                _databases.Insert(0, tab.Database);
+            }
+        }
+        catch
+        {
+            if (!_databases.Contains(tab.Database))
+            {
+                _databases = [tab.Database];
+            }
+        }
+    }
+
+    private async Task OnDatabaseChanged(string database)
+    {
+        if (Sessions.ActiveTab is { } tab)
+        {
+            tab.Database = database;
+            tab.Title = $"{(Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)?.Name ?? "Query")} — {database}";
+            Sessions.Notify();
+
+            var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+                             ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == tab.ConnectionId);
+            if (connection is not null)
+            {
+                _ = IntelliSense.EnsureAsync(connection, database);
+            }
+        }
+    }
+
+    private async Task RefreshIntelliSenseAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Snackbar.Add("Open a query tab first.", Severity.Warning);
+            return;
+        }
+
+        var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+                         ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == tab.ConnectionId);
+        if (connection is null)
+        {
+            Snackbar.Add("Connect to a server first.", Severity.Warning);
+            return;
+        }
+
+        Snackbar.Add("Refreshing IntelliSense…", Severity.Info);
+        var snap = await IntelliSense.EnsureAsync(connection, tab.Database, forceRefresh: true);
+        if (snap?.Status.StartsWith("Error") == true)
+        {
+            Snackbar.Add(snap.Status, Severity.Error);
+        }
+        else
+        {
+            Snackbar.Add(
+                $"IntelliSense ready — {snap?.Databases.Count:N0} databases, {snap?.TableCount:N0} tables/views.",
+                Severity.Success);
+        }
+    }
+
+    private void CloseActive()
+    {
+        if (Sessions.ActiveTabId is Guid id)
+        {
+            Sessions.CloseTab(id);
+        }
+    }
+
+    public async Task ExecuteActiveAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Snackbar.Add("Open a query tab first (New Query).", Severity.Warning);
+            return;
+        }
+
+        var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+                         ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == tab.ConnectionId);
+
+        if (connection is null)
+        {
+            Snackbar.Add("Connection not found. Reconnect from Object Explorer.", Severity.Warning);
+            return;
+        }
+
+        var sql = await Editors.GetSelectedOrAllSqlAsync(tab.Id) ?? tab.Sql;
+        tab.Sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            Snackbar.Add("Nothing to execute.", Severity.Warning);
+            return;
+        }
+
+        tab.IsExecuting = true;
+        Sessions.Notify();
+
+        try
+        {
+            tab.LastResult = await QueryRunner.ExecuteAsync(connection, tab.Database, sql);
+            if (!string.IsNullOrEmpty(tab.LastResult.Error) && tab.LastResult.Error != "Cancelled")
+            {
+                Snackbar.Add(tab.LastResult.Error, Severity.Error);
+            }
+            else if (string.IsNullOrEmpty(tab.LastResult.Error))
+            {
+                var rows = tab.LastResult.ResultSets.Sum(r => r.Rows.Count);
+                Snackbar.Add($"Query completed — {rows:N0} row(s).", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            tab.LastResult = new QueryResult { Error = ex.Message, Messages = [ex.Message] };
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            tab.IsExecuting = false;
+            Sessions.Notify();
+        }
+    }
+
+    public void Dispose() => Sessions.Changed -= OnSessionsChanged;
+}

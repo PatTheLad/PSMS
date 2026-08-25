@@ -1,0 +1,409 @@
+@inject ActiveSessionService Sessions
+@inject QueryRunner QueryRunner
+@inject IConnectionStore Store
+@inject IFileDialogService FileDialogs
+@inject EditorRegistry Editors
+@inject SchemaIntelliSenseService IntelliSense
+@inject IntelliSenseJsBridge IntelliSenseJs
+@inject ContextMenuService Menus
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@implements IDisposable
+@implements IAsyncDisposable
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="psms-shell" @onkeydown="OnKeyDown" tabindex="0" style="@ShellStyle" @onclick="Menus.Close">
+    <MudAppBar Elevation="0" Dense="true" Class="psms-toolbar" Gutters="true">
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600;letter-spacing:0.04em;color:var(--psms-accent)" Class="mr-3">PSMS</MudText>
+
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudButton>
+        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save</MudButton>
+        <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                   Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
+
+        <MudSpacer />
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">SQL Server</MudChip>
+        <MudTooltip Text="Refresh object catalog used by Insert object">
+            <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
+                           OnClick="RefreshIntelliSenseAsync" aria-label="Refresh catalog" />
+        </MudTooltip>
+        <MudText Typo="Typo.caption" Class="ml-2 d-none d-md-inline" Style="opacity:.7">F5 · Ctrl+Space · Right-click</MudText>
+    </MudAppBar>
+
+    <div class="psms-body">
+        <aside class="psms-explorer">
+            <ObjectExplorer @ref="_explorer"
+                            OnOpenQuery="HandleOpenQuery"
+                            OnEditConnection="EditConnection"
+                            OnRequestNewConnection="OpenNewConnection" />
+        </aside>
+        <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
+             @onmousedown="StartExplorerDrag"></div>
+        <section class="psms-main">
+            <QueryWorkspace @ref="_workspace" />
+            <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
+                 @onmousedown="StartEditorDrag"></div>
+            <ResultsPane />
+        </section>
+    </div>
+
+    <StatusBar />
+    <AppContextMenu />
+    <ObjectSuggestPopup @ref="_suggest" />
+</div>
+
+@code {
+    private QueryWorkspace? _workspace;
+    private ObjectExplorer? _explorer;
+    private ObjectSuggestPopup? _suggest;
+    private bool _draggingExplorer;
+    private bool _draggingEditor;
+    private DotNetObjectReference<App>? _dotNetRef;
+
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+
+    private string ShellStyle =>
+        $"--explorer-width:{Sessions.ExplorerWidth:0}px;--editor-ratio:{Sessions.EditorRatio * 100:0.##}%";
+
+    private bool CanExecute => Sessions.ActiveTab is not null && !Sessions.ActiveTab.IsExecuting;
+    private bool CanCancel => Sessions.ActiveTab?.IsExecuting == true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#2dd4bf",
+            Secondary = "#38bdf8",
+            Background = "#0f1419",
+            Surface = "#161b22",
+            AppbarBackground = "#161b22",
+            DrawerBackground = "#161b22",
+            TextPrimary = "#e6edf3",
+            TextSecondary = "#8b9bb0",
+            ActionDefault = "#8b9bb0",
+            Divider = "#2a3441",
+            LinesDefault = "#2a3441",
+            TableLines = "#2a3441",
+            Error = "#f87171",
+            Success = "#34d399",
+            Warning = "#fbbf24",
+            Info = "#38bdf8"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["IBM Plex Sans", "Segoe UI", "sans-serif"]
+            }
+        }
+    };
+
+    protected override void OnInitialized()
+    {
+        Sessions.Changed += OnSessionsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            // Bind JS to this component's sync context — never call JS from background threads.
+            IntelliSenseJs.Bind(Js, InvokeAsync);
+            try
+            {
+                await Js.InvokeVoidAsync("eval", """
+                    window.psmsDrag = {
+                      start(dotnet, mode) {
+                        const move = (e) => dotnet.invokeMethodAsync('OnDrag', mode, e.clientX, e.clientY, window.innerWidth, window.innerHeight);
+                        const up = () => {
+                          window.removeEventListener('mousemove', move);
+                          window.removeEventListener('mouseup', up);
+                          dotnet.invokeMethodAsync('OnDragEnd');
+                        };
+                        window.addEventListener('mousemove', move);
+                        window.addEventListener('mouseup', up);
+                      }
+                    };
+                    """);
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+    }
+
+    private void OnSessionsChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "F5" || (e.CtrlKey && (e.Key == "Enter" || e.Code == "Enter")))
+        {
+            await ExecuteAsync();
+        }
+        else if (e.CtrlKey && e.Key.Equals(" ", StringComparison.Ordinal))
+        {
+            OpenSuggest();
+        }
+        else if (e.CtrlKey && e.Key.Equals("n", StringComparison.OrdinalIgnoreCase))
+        {
+            await NewQueryAsync();
+        }
+        else if (e.CtrlKey && e.Key.Equals("s", StringComparison.OrdinalIgnoreCase))
+        {
+            await SaveSqlAsync();
+        }
+        else if (e.CtrlKey && e.Key.Equals("o", StringComparison.OrdinalIgnoreCase))
+        {
+            await OpenSqlAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            Menus.Close();
+        }
+    }
+
+    private void OpenSuggest() => _suggest?.Open();
+
+    private async Task StartExplorerDrag()
+    {
+        _draggingExplorer = true;
+        if (_dotNetRef is not null)
+        {
+            await Js.InvokeVoidAsync("psmsDrag.start", _dotNetRef, "explorer");
+        }
+    }
+
+    private async Task StartEditorDrag()
+    {
+        _draggingEditor = true;
+        if (_dotNetRef is not null)
+        {
+            await Js.InvokeVoidAsync("psmsDrag.start", _dotNetRef, "editor");
+        }
+    }
+
+    [JSInvokable]
+    public void OnDrag(string mode, double x, double y, double width, double height)
+    {
+        if (mode == "explorer")
+        {
+            Sessions.ExplorerWidth = Math.Clamp(x, 220, 480);
+        }
+        else
+        {
+            Sessions.EditorRatio = Math.Clamp(y / Math.Max(height - 72, 1), 0.2, 0.8);
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnDragEnd()
+    {
+        _draggingExplorer = false;
+        _draggingEditor = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenNewConnection()
+    {
+        var parameters = new DialogParameters<ConnectionDialog>
+        {
+            { x => x.Connection, new ConnectionDefinition() }
+        };
+        var dialog = await DialogService.ShowAsync<ConnectionDialog>("New connection", parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false } && _explorer is not null)
+        {
+            await _explorer.ReloadAsync();
+        }
+    }
+
+    private async Task EditConnection(ConnectionDefinition connection)
+    {
+        var parameters = new DialogParameters<ConnectionDialog>
+        {
+            { x => x.Connection, Clone(connection) }
+        };
+        var dialog = await DialogService.ShowAsync<ConnectionDialog>("Edit connection", parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false } && _explorer is not null)
+        {
+            await _explorer.ReloadAsync();
+        }
+    }
+
+    private void HandleOpenQuery((ConnectionDefinition Connection, string Database, string? Sql, string? Title) args)
+    {
+        Sessions.OpenQueryTab(args.Connection, args.Database, args.Sql, args.Title);
+    }
+
+    private async Task NewQueryAsync()
+    {
+        var connection = Sessions.SelectedConnection
+                         ?? Sessions.OpenConnections.FirstOrDefault()
+                         ?? (await Store.GetAllAsync()).FirstOrDefault();
+
+        if (connection is null)
+        {
+            Snackbar.Add("Create or connect a connection first.", Severity.Warning);
+            return;
+        }
+
+        var database = Sessions.ActiveTab?.Database
+                       ?? connection.Database
+                       ?? "master";
+        Sessions.OpenQueryTab(connection, database);
+        _ = IntelliSense.EnsureAsync(connection, database);
+    }
+
+    private async Task RefreshIntelliSenseAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        var connection = tab is not null
+            ? Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId)
+              ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == tab.ConnectionId)
+            : Sessions.SelectedConnection;
+
+        var database = tab?.Database ?? connection?.Database ?? "master";
+        if (connection is null)
+        {
+            Snackbar.Add("Connect to a server first.", Severity.Warning);
+            return;
+        }
+
+        Snackbar.Add("Refreshing IntelliSense…", Severity.Info);
+        var snap = await IntelliSense.EnsureAsync(connection, database, forceRefresh: true);
+        await IntelliSenseJs.PushCurrentAsync();
+        if (snap?.Status.StartsWith("Error") == true)
+        {
+            Snackbar.Add(snap.Status, Severity.Error);
+        }
+        else
+        {
+            Snackbar.Add(
+                $"IntelliSense ready — {snap?.Databases.Count:N0} databases, {snap?.TableCount:N0} tables/views.",
+                Severity.Success);
+        }
+    }
+
+    private async Task OpenSqlAsync()
+    {
+        var path = await FileDialogs.OpenSqlFileAsync();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var sql = await File.ReadAllTextAsync(path);
+        var connection = Sessions.SelectedConnection
+                         ?? Sessions.OpenConnections.FirstOrDefault()
+                         ?? (await Store.GetAllAsync()).FirstOrDefault();
+        if (connection is null)
+        {
+            Snackbar.Add("Create a connection before opening scripts.", Severity.Warning);
+            return;
+        }
+
+        var tab = Sessions.OpenQueryTab(connection, connection.Database ?? "master", sql, Path.GetFileName(path));
+        tab.FilePath = path;
+        tab.IsDirty = false;
+        Sessions.Notify();
+    }
+
+    private async Task SaveSqlAsync()
+    {
+        var tab = Sessions.ActiveTab;
+        if (tab is null)
+        {
+            Snackbar.Add("No active query tab.", Severity.Warning);
+            return;
+        }
+
+        tab.Sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+        var path = tab.FilePath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = await FileDialogs.SaveSqlFileAsync($"{tab.Title}.sql");
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            tab.FilePath = path;
+            tab.Title = Path.GetFileName(path);
+        }
+
+        await File.WriteAllTextAsync(path, tab.Sql);
+        tab.IsDirty = false;
+        Sessions.Notify();
+        Snackbar.Add($"Saved {path}", Severity.Success);
+    }
+
+    private async Task ExecuteAsync()
+    {
+        if (_workspace is null)
+        {
+            Snackbar.Add("Query workspace is not ready.", Severity.Warning);
+            return;
+        }
+
+        await _workspace.ExecuteActiveAsync();
+    }
+
+    private void Cancel() => QueryRunner.Cancel();
+
+    private Task DisconnectAsync()
+    {
+        var id = Sessions.ActiveTab?.ConnectionId ?? Sessions.SelectedConnectionId;
+        if (id is Guid connectionId)
+        {
+            Sessions.MarkDisconnected(connectionId);
+            IntelliSense.Invalidate(connectionId);
+            Snackbar.Add("Disconnected.", Severity.Info);
+        }
+        else
+        {
+            Snackbar.Add("Nothing to disconnect.", Severity.Warning);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static ConnectionDefinition Clone(ConnectionDefinition source) => new()
+    {
+        Id = source.Id,
+        Name = source.Name,
+        Engine = source.Engine,
+        Server = source.Server,
+        Database = source.Database,
+        UseWindowsAuth = source.UseWindowsAuth,
+        UserName = source.UserName,
+        EncryptedPassword = source.EncryptedPassword,
+        Encrypt = source.Encrypt,
+        TrustServerCertificate = source.TrustServerCertificate,
+        Port = source.Port
+    };
+
+    public void Dispose()
+    {
+        Sessions.Changed -= OnSessionsChanged;
+        _dotNetRef?.Dispose();
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}

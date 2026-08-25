@@ -1,0 +1,156 @@
+@inject EditorRegistry Editors
+@inject ActiveSessionService Sessions
+@inject SchemaIntelliSenseService IntelliSense
+@inject IntelliSenseJsBridge IntelliSenseJs
+@inject IConnectionStore Store
+@inject IJSRuntime Js
+@implements IDisposable
+
+<div class="monaco-host">
+    <StandaloneCodeEditor @ref="_editor"
+                          Id="@($"editor-{Tab.Id:N}")"
+                          CssClass="monaco-host"
+                          ConstructionOptions="EditorConstructionOptions"
+                          OnDidInit="OnDidInit" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public QueryTab Tab { get; set; } = default!;
+
+    private StandaloneCodeEditor? _editor;
+
+    protected override void OnInitialized()
+    {
+        Editors.Register(Tab.Id, GetAllSqlAsync, GetSelectedOrAllSqlAsync, SetSqlAsync);
+    }
+
+    private StandaloneEditorConstructionOptions EditorConstructionOptions(StandaloneCodeEditor editor)
+    {
+        return new StandaloneEditorConstructionOptions
+        {
+            Language = "sql",
+            Theme = "vs-dark",
+            AutomaticLayout = true,
+            Minimap = new EditorMinimapOptions { Enabled = false },
+            Value = Tab.Sql,
+            FontSize = 14,
+            FontFamily = "IBM Plex Mono, Consolas, monospace",
+            ScrollBeyondLastLine = false,
+            WordWrap = "off",
+            LineNumbers = "on",
+            GlyphMargin = false,
+            Folding = true,
+            SuggestOnTriggerCharacters = true,
+            QuickSuggestions = new QuickSuggestionsOptions
+            {
+                Other = "on",
+                Comments = "off",
+                Strings = "off"
+            },
+            WordBasedSuggestions = false,
+            SnippetSuggestions = "none",
+            Suggest = new SuggestOptions
+            {
+                ShowWords = false,
+                Preview = false,
+                InsertMode = "insert"
+            }
+        };
+    }
+
+    private async Task OnDidInit()
+    {
+        await IntelliSenseJs.EnsureRegisteredAsync();
+        try
+        {
+            await Js.InvokeVoidAsync("psmsIntelliSense.attachEditor", $"editor-{Tab.Id:N}");
+        }
+        catch
+        {
+            // Monaco host may not be ready; catalog push still works.
+        }
+
+        await WarmIntelliSenseAsync();
+    }
+
+    private async Task WarmIntelliSenseAsync()
+    {
+        var connection = Sessions.OpenConnections.FirstOrDefault(c => c.Id == Tab.ConnectionId)
+                         ?? (await Store.GetAllAsync()).FirstOrDefault(c => c.Id == Tab.ConnectionId);
+        if (connection is null)
+        {
+            return;
+        }
+
+        // Fire-and-forget load so editor stays responsive; Changed → bridge push.
+        _ = IntelliSense.EnsureAsync(connection, Tab.Database);
+    }
+
+    private async Task<string> GetAllSqlAsync()
+    {
+        if (_editor is null)
+        {
+            return Tab.Sql;
+        }
+
+        try
+        {
+            return await _editor.GetValue() ?? Tab.Sql;
+        }
+        catch
+        {
+            return Tab.Sql;
+        }
+    }
+
+    private async Task<string> GetSelectedOrAllSqlAsync()
+    {
+        if (_editor is null)
+        {
+            return Tab.Sql;
+        }
+
+        try
+        {
+            var selection = await _editor.GetSelection();
+            if (selection is not null
+                && !(selection.StartLineNumber == selection.EndLineNumber
+                     && selection.StartColumn == selection.EndColumn))
+            {
+                var model = await _editor.GetModel();
+                if (model is not null)
+                {
+                    var selected = await model.GetValueInRange(selection, EndOfLinePreference.TextDefined);
+                    if (!string.IsNullOrWhiteSpace(selected))
+                    {
+                        return selected;
+                    }
+                }
+            }
+
+            return await GetAllSqlAsync();
+        }
+        catch
+        {
+            return await GetAllSqlAsync();
+        }
+    }
+
+    private async Task SetSqlAsync(string sql)
+    {
+        Tab.Sql = sql;
+        if (_editor is not null)
+        {
+            try
+            {
+                await _editor.SetValue(sql);
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+    }
+
+    public void Dispose() => Editors.Unregister(Tab.Id);
+}
