@@ -85,6 +85,12 @@ $icoSrc = Join-Path $repoRoot 'src/PSMS.App/wwwroot/favicon.ico'
 if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $publishDir 'appicon.png') -Force }
 if (Test-Path $icoSrc) { Copy-Item $icoSrc (Join-Path $publishDir 'favicon.ico') -Force }
 
+Write-Host "Restoring app assets for win-x64 (WiX publish)..." -ForegroundColor Cyan
+dotnet restore $appProj -r win-x64
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet restore failed with exit code $LASTEXITCODE"
+}
+
 Write-Host "Building MSI + Setup bootstrapper (WiX, $Configuration, version $Version)..." -ForegroundColor Cyan
 dotnet build $bundleProj `
     -c $Configuration `
