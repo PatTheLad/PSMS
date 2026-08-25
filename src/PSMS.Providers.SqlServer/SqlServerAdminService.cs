@@ -8,7 +8,7 @@ using PSMS.Core.Models.Admin;
 
 namespace PSMS.Providers.SqlServer;
 
-public sealed class SqlServerAdminService : ISqlServerAdminService
+public sealed partial class SqlServerAdminService : ISqlServerAdminService
 {
     private static readonly HashSet<string> SystemDatabases = new(StringComparer.OrdinalIgnoreCase)
     {

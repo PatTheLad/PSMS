@@ -39,7 +39,7 @@
                    OnClick="ToggleAdmin">Admin</MudButton>
 
         <MudSpacer />
-        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">SQL Server</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
         <MudTooltip Text="Refresh object catalog used by Insert object">
             <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
                            OnClick="RefreshIntelliSenseAsync" aria-label="Refresh catalog" />
@@ -88,6 +88,28 @@
 
     private string ShellStyle =>
         $"--explorer-width:{Sessions.ExplorerWidth:0}px;--editor-ratio:{Sessions.EditorRatio * 100:0.##}%";
+
+    private string EngineLabel
+    {
+        get
+        {
+            if (Sessions.SelectedConnection is { } sel)
+            {
+                return sel.Engine.ToString();
+            }
+
+            if (Sessions.ActiveTab is { } tab)
+            {
+                var conn = Sessions.OpenConnections.FirstOrDefault(c => c.Id == tab.ConnectionId);
+                if (conn is not null)
+                {
+                    return conn.Engine.ToString();
+                }
+            }
+
+            return "PSMS";
+        }
+    }
 
     private bool CanExecute => Sessions.ActiveTab is not null && !Sessions.ActiveTab.IsExecuting;
     private bool CanCancel => Sessions.ActiveTab?.IsExecuting == true;

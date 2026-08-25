@@ -1,0 +1,127 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Security — Logins</MudText>
+    <MudSpacer />
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => _showForm = true" Disabled="Busy">New login</MudButton>
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+@if (_showForm)
+{
+    <MudPaper Class="pa-3 mb-3" Style="background:var(--psms-panel-2)">
+        <MudStack Spacing="2">
+            <MudTextField @bind-Value="_create.LoginName" Label="Login name" Immediate="true" />
+            <MudTextField @bind-Value="_create.Password" Label="Password" InputType="InputType.Password" Immediate="true" />
+            <MudTextField @bind-Value="_create.DefaultDatabase" Label="Default database" />
+            <MudTextField @bind-Value="_create.MapToDatabase" Label="Map user in database (optional)" />
+            <MudSwitch @bind-Value="_create.MustChange" Label="Must change password" Color="Color.Primary" />
+            <MudStack Row="true">
+                <MudButton Size="Size.Small" OnClick="() => _showForm = false">Cancel</MudButton>
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" OnClick="CreateAsync">Create</MudButton>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+
+<MudTable Items="_logins" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None" Filter="FilterLogin">
+    <ToolBarContent>
+        <MudTextField @bind-Value="_filter" Placeholder="Filter…" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="mt-0" />
+    </ToolBarContent>
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Type</MudTh>
+        <MudTh>Default DB</MudTh>
+        <MudTh>Disabled</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@context.Type</MudTd>
+        <MudTd>@context.DefaultDatabase</MudTd>
+        <MudTd>@(context.IsDisabled ? "Yes" : "No")</MudTd>
+        <MudTd Style="white-space:nowrap">
+            <MudButton Size="Size.Small" Variant="Variant.Text"
+                       OnClick="() => SetEnabledAsync(context, context.IsDisabled)">@(context.IsDisabled ? "Enable" : "Disable")</MudButton>
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="() => DropAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public bool Busy { get; set; }
+
+    private readonly List<LoginInfo> _logins = [];
+    private CreateLoginRequest _create = new() { DefaultDatabase = "master" };
+    private string _filter = string.Empty;
+    private bool _loading;
+    private bool _showForm;
+
+    private bool FilterLogin(LoginInfo login) =>
+        string.IsNullOrWhiteSpace(_filter)
+        || login.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_logins.Count == 0 && !_loading)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _logins.Clear();
+            _logins.AddRange(await Admin.GetLoginsAsync(Connection, password));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.CreateLoginAsync(Connection, password, _create);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        if (result.Succeeded)
+        {
+            _showForm = false;
+            _create = new CreateLoginRequest { DefaultDatabase = "master" };
+            await ReloadAsync();
+        }
+    }
+
+    private async Task SetEnabledAsync(LoginInfo login, bool enable)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.SetLoginEnabledAsync(Connection, password, login.Name, enable);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+    }
+
+    private async Task DropAsync(LoginInfo login)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.DropLoginAsync(Connection, password, login.Name);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+        await ReloadAsync();
+    }
+}

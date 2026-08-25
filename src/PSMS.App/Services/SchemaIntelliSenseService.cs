@@ -97,9 +97,12 @@ public sealed class SchemaIntelliSenseService
                     StringComparer.OrdinalIgnoreCase);
 
             // Table/view names from every other database (for cross-db completion).
-            var otherObjects = await LoadTablesFromOtherDatabasesAsync(
-                    provider, connection, password, databases, database, cancellationToken)
-                .ConfigureAwait(false);
+            // File engines (SQLite/Access) have a single catalog — skip the scan.
+            var otherObjects = connection.Engine == DbEngine.SqlServer
+                ? await LoadTablesFromOtherDatabasesAsync(
+                        provider, connection, password, databases, database, cancellationToken)
+                    .ConfigureAwait(false)
+                : [];
 
             var allObjects = activeObjects
                 .Concat(otherObjects)

@@ -11,7 +11,11 @@
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
             @if (_connection is null)
             {
-                <text>Connect a server in Object Explorer, then open Admin.</text>
+                <text>Connect a SQL Server in Object Explorer, then open Admin.</text>
+            }
+            else if (_connection.Engine != DbEngine.SqlServer)
+            {
+                <text>Admin tools require a SQL Server connection (current: @_connection.Engine).</text>
             }
             else
             {
@@ -20,7 +24,7 @@
         </MudText>
         <MudSpacer />
         <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
-                   Disabled="_busy || _connection is null" OnClick="RefreshAsync">Refresh</MudButton>
+                   Disabled="_busy || _connection is null || _connection.Engine != DbEngine.SqlServer" OnClick="RefreshAsync">Refresh</MudButton>
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Code"
                    OnClick="BackToQueries">Queries</MudButton>
     </div>
@@ -31,11 +35,21 @@
             Connect to a SQL Server instance first, then click <strong>Admin</strong> in the toolbar.
         </div>
     }
+    else if (_connection.Engine != DbEngine.SqlServer)
+    {
+        <div class="psms-empty" style="padding:2rem">
+            SQL Server Admin (Agent, Profiler, Security, …) is not available for <strong>@_connection.Engine</strong> connections.
+            Select or create a SQL Server connection.
+        </div>
+    }
     else
     {
         <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_tab" Class="psms-admin-tabs">
             <MudTabPanel Text="Analysis" Icon="@Icons.Material.Filled.Insights" Class="psms-admin-panel">
                 <AnalysisPanel Snapshot="_snapshot" Busy="_busy" />
+            </MudTabPanel>
+            <MudTabPanel Text="Activity" Icon="@Icons.Material.Filled.MonitorHeart" Class="psms-admin-panel">
+                <ActivityMonitorPanel Connection="_connection" Snapshot="_snapshot" Busy="_busy" OnChanged="RefreshAsync" />
             </MudTabPanel>
             <MudTabPanel Text="Databases" Icon="@Icons.Material.Filled.Storage" Class="psms-admin-panel">
                 <DatabasesAdminPanel Connection="_connection"
@@ -46,8 +60,23 @@
                                     OnBackup="OpenBackup"
                                     OnRestore="OpenRestore" />
             </MudTabPanel>
+            <MudTabPanel Text="Properties" Icon="@Icons.Material.Filled.Tune" Class="psms-admin-panel">
+                <DatabasePropertiesPanel Connection="_connection" Databases="DbNames" Busy="_busy" OnChanged="RefreshAsync" />
+            </MudTabPanel>
             <MudTabPanel Text="SQL Agent" Icon="@Icons.Material.Filled.Schedule" Class="psms-admin-panel">
                 <AgentJobsPanel Connection="_connection" Busy="_busy" OnStatusChanged="OnAgentTouched" />
+            </MudTabPanel>
+            <MudTabPanel Text="Operators" Icon="@Icons.Material.Filled.NotificationsActive" Class="psms-admin-panel">
+                <OperatorsAlertsPanel Connection="_connection" Busy="_busy" />
+            </MudTabPanel>
+            <MudTabPanel Text="Profiler" Icon="@Icons.Material.Filled.Speed" Class="psms-admin-panel">
+                <ProfilerPanel Connection="_connection" Busy="_busy" OnOpenSql="OpenProfilerScript" />
+            </MudTabPanel>
+            <MudTabPanel Text="Security" Icon="@Icons.Material.Filled.Security" Class="psms-admin-panel">
+                <SecurityPanel Connection="_connection" Busy="_busy" />
+            </MudTabPanel>
+            <MudTabPanel Text="Indexes" Icon="@Icons.Material.Filled.AccountTree" Class="psms-admin-panel">
+                <IndexesPanel Connection="_connection" Databases="DbNames" Busy="_busy" />
             </MudTabPanel>
         </MudTabs>
     }
@@ -58,6 +87,10 @@
     private ServerAnalysisSnapshot? _snapshot;
     private bool _busy;
     private int _tab;
+
+    private IReadOnlyList<string> DbNames =>
+        _snapshot?.Databases.Select(d => d.Name).ToList()
+        ?? (IReadOnlyList<string>)["master"];
 
     protected override void OnInitialized()
     {
@@ -85,7 +118,7 @@
     private async Task LoadAsync()
     {
         _connection = ResolveConnection();
-        if (_connection is null)
+        if (_connection is null || _connection.Engine != DbEngine.SqlServer)
         {
             _snapshot = null;
             StateHasChanged();
@@ -97,7 +130,7 @@
 
     private async Task RefreshAsync()
     {
-        if (_connection is null)
+        if (_connection is null || _connection.Engine != DbEngine.SqlServer)
         {
             return;
         }
@@ -123,6 +156,13 @@
     private Task OnAgentTouched() => RefreshAsync();
 
     private void BackToQueries() => Sessions.ShowQueries();
+
+    private void OpenProfilerScript(string script)
+    {
+        if (_connection is null) return;
+        Sessions.OpenQueryTab(_connection, "master", script, "Profiler session");
+        Sessions.ShowQueries();
+    }
 
     private async Task OpenCreateDb()
     {

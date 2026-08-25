@@ -1,0 +1,137 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+@inject ActiveSessionService Sessions
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Indexes</MudText>
+    <MudSelect T="string" Value="_database" ValueChanged="OnDbChanged" Dense="true" Style="max-width:200px" Label="Database">
+        @foreach (var db in Databases)
+        {
+            <MudSelectItem Value="@db">@db</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSpacer />
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">Missing indexes</MudText>
+<MudTable Items="_missing" Dense="true" Hover="true" Class="psms-admin-table mb-3" Breakpoint="Breakpoint.None">
+    <HeaderContent>
+        <MudTh>Table</MudTh>
+        <MudTh>Impact</MudTh>
+        <MudTh>Seeks</MudTh>
+        <MudTh>Statement</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.SchemaName.@context.TableName</MudTd>
+        <MudTd>@context.Impact.ToString("N1")</MudTd>
+        <MudTd>@context.UserSeeks</MudTd>
+        <MudTd Style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@context.CreateIndexStatement">
+            @context.CreateIndexStatement
+        </MudTd>
+        <MudTd>
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => ScriptMissing(context)">Script</MudButton>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">Fragmentation (&gt;5%, &gt;100 pages)</MudText>
+<MudTable Items="_frag" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+    <HeaderContent>
+        <MudTh>Index</MudTh>
+        <MudTh>Table</MudTh>
+        <MudTh>Frag %</MudTh>
+        <MudTh>Pages</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.IndexName</MudTd>
+        <MudTd>@context.SchemaName.@context.TableName</MudTd>
+        <MudTd>@context.AvgFragmentationPercent.ToString("N1")</MudTd>
+        <MudTd>@context.PageCount</MudTd>
+        <MudTd Style="white-space:nowrap">
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => ReorganizeAsync(context)">Reorganize</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="() => RebuildAsync(context)">Rebuild</MudButton>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public IReadOnlyList<string> Databases { get; set; } = [];
+    [Parameter] public bool Busy { get; set; }
+
+    private readonly List<MissingIndexInfo> _missing = [];
+    private readonly List<IndexFragmentationInfo> _frag = [];
+    private string _database = "master";
+    private bool _loading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Databases.Count > 0 && (string.IsNullOrWhiteSpace(_database) || !Databases.Contains(_database)))
+        {
+            _database = Databases.FirstOrDefault(d => !string.Equals(d, "tempdb", StringComparison.OrdinalIgnoreCase)) ?? Databases[0];
+        }
+
+        if (_missing.Count == 0 && !_loading && !string.IsNullOrWhiteSpace(_database))
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task OnDbChanged(string db)
+    {
+        _database = db;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_database)) return;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _missing.Clear();
+            _missing.AddRange(await Admin.GetMissingIndexesAsync(Connection, password, _database));
+            _frag.Clear();
+            _frag.AddRange(await Admin.GetIndexFragmentationAsync(Connection, password, _database));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ScriptMissing(MissingIndexInfo info)
+    {
+        var sql = $"USE [{info.DatabaseName}];\nGO\n{info.CreateIndexStatement}";
+        Sessions.OpenQueryTab(Connection, info.DatabaseName, sql, $"IX {info.TableName}");
+        Sessions.ShowQueries();
+    }
+
+    private async Task RebuildAsync(IndexFragmentationInfo info)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.RebuildIndexAsync(Connection, password, _database, info.SchemaName, info.TableName, info.IndexName);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+    }
+
+    private async Task ReorganizeAsync(IndexFragmentationInfo info)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.ReorganizeIndexAsync(Connection, password, _database, info.SchemaName, info.TableName, info.IndexName);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+    }
+}

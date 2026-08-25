@@ -1,0 +1,207 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudTextField @bind-Value="_name" Label="Job name" Required="true" Disabled="_isEdit" Immediate="true" />
+            @if (_isEdit)
+            {
+                <MudTextField @bind-Value="_newName" Label="Rename to (optional)" Immediate="true" />
+            }
+            <MudTextField @bind-Value="_description" Label="Description" Lines="2" />
+            <MudTextField @bind-Value="_category" Label="Category" />
+            <MudSwitch @bind-Value="_enabled" Label="Enabled" Color="Color.Primary" />
+            <MudTextField @bind-Value="_notifyOperator" Label="Notify operator on failure (optional)" />
+
+            <MudText Typo="Typo.subtitle2">Steps</MudText>
+            @for (var i = 0; i < _steps.Count; i++)
+            {
+                var idx = i;
+                var step = _steps[idx];
+                <MudPaper Class="pa-2" Style="background:var(--psms-panel-2)">
+                    <MudStack Spacing="1">
+                        <MudStack Row="true" AlignItems="AlignItems.Center">
+                            <MudText Typo="Typo.caption">Step @(idx + 1)</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           Disabled="_steps.Count <= 1" OnClick="() => RemoveStep(idx)" />
+                        </MudStack>
+                        <MudTextField @bind-Value="step.StepName" Label="Step name" Immediate="true" />
+                        <MudSelect T="string" @bind-Value="step.Subsystem" Label="Subsystem">
+                            <MudSelectItem Value="@("TSQL")">T-SQL</MudSelectItem>
+                            <MudSelectItem Value="@("CmdExec")">Operating system (CmdExec)</MudSelectItem>
+                            <MudSelectItem Value="@("PowerShell")">PowerShell</MudSelectItem>
+                        </MudSelect>
+                        <MudTextField @bind-Value="step.DatabaseName" Label="Database" Immediate="true" />
+                        <MudTextField @bind-Value="step.Command" Label="Command" Lines="4" Immediate="true"
+                                      Style="font-family:var(--psms-mono)" />
+                    </MudStack>
+                </MudPaper>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddStep">Add step</MudButton>
+
+            <MudText Typo="Typo.subtitle2">Schedule</MudText>
+            <MudSwitch @bind-Value="_useSchedule" Label="Attach schedule" Color="Color.Primary" />
+            @if (_useSchedule)
+            {
+                <MudTextField @bind-Value="_schedule.Name" Label="Schedule name" />
+                <MudSelect T="string" @bind-Value="_schedule.Frequency" Label="Frequency">
+                    <MudSelectItem Value="@("Once")">Once</MudSelectItem>
+                    <MudSelectItem Value="@("Daily")">Daily</MudSelectItem>
+                    <MudSelectItem Value="@("Weekly")">Weekly (Mon–Fri)</MudSelectItem>
+                </MudSelect>
+                <MudDatePicker @bind-Date="_scheduleDate" Label="Start date" Editable="true" />
+                <MudTimePicker @bind-Time="_scheduleTime" Label="Start time" Editable="true" />
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_name) || _steps.Count == 0">
+            @if (_busy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            @(_isEdit ? "Save" : "Create")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public AgentJobInfo? Existing { get; set; }
+    [Parameter] public IReadOnlyList<AgentJobStepInfo>? ExistingSteps { get; set; }
+
+    private string _name = string.Empty;
+    private string _newName = string.Empty;
+    private string _description = string.Empty;
+    private string _category = "[Uncategorized]";
+    private string _notifyOperator = string.Empty;
+    private bool _enabled = true;
+    private bool _isEdit;
+    private bool _busy;
+    private bool _useSchedule;
+    private readonly List<AgentJobStepRequest> _steps = [];
+    private readonly AgentScheduleRequest _schedule = new() { Name = "Schedule", Frequency = "Daily" };
+    private DateTime? _scheduleDate = DateTime.Today;
+    private TimeSpan? _scheduleTime = DateTime.Now.AddMinutes(5).TimeOfDay;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Existing is not null;
+        if (Existing is { } job)
+        {
+            _name = job.Name;
+            _description = job.Description;
+            _category = string.IsNullOrWhiteSpace(job.Category) ? "[Uncategorized]" : job.Category;
+            _enabled = job.Enabled;
+            if (ExistingSteps is { Count: > 0 })
+            {
+                foreach (var s in ExistingSteps)
+                {
+                    _steps.Add(new AgentJobStepRequest
+                    {
+                        StepId = s.StepId,
+                        StepName = s.StepName,
+                        Subsystem = s.Subsystem,
+                        Command = s.Command,
+                        DatabaseName = string.IsNullOrWhiteSpace(s.DatabaseName) ? "master" : s.DatabaseName
+                    });
+                }
+            }
+        }
+
+        if (_steps.Count == 0)
+        {
+            AddStep();
+        }
+    }
+
+    private void AddStep() => _steps.Add(new AgentJobStepRequest
+    {
+        StepName = $"Step {_steps.Count + 1}",
+        Command = "SELECT 1;",
+        DatabaseName = Connection.Database ?? "master"
+    });
+
+    private void RemoveStep(int index)
+    {
+        if (_steps.Count > 1 && index >= 0 && index < _steps.Count)
+        {
+            _steps.RemoveAt(index);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            AgentScheduleRequest? schedule = null;
+            if (_useSchedule && _scheduleDate is { } d)
+            {
+                var t = _scheduleTime ?? TimeSpan.FromHours(1);
+                _schedule.StartAt = new DateTimeOffset(d.Date.Add(t));
+                if (_schedule.Frequency == "Weekly")
+                {
+                    _schedule.WeeklyDaysMask = 62;
+                }
+
+                schedule = _schedule;
+            }
+
+            AdminOperationResult result;
+            if (_isEdit && Existing is not null)
+            {
+                result = await Admin.UpdateAgentJobAsync(Connection, password, new UpdateAgentJobRequest
+                {
+                    JobId = Existing.JobId,
+                    Name = _name,
+                    NewName = string.IsNullOrWhiteSpace(_newName) ? null : _newName,
+                    Description = _description,
+                    Category = _category,
+                    Enabled = _enabled,
+                    Steps = _steps,
+                    Schedule = schedule,
+                    NotifyOperatorOnFailure = string.IsNullOrWhiteSpace(_notifyOperator) ? null : _notifyOperator
+                });
+            }
+            else
+            {
+                result = await Admin.CreateAgentJobAsync(Connection, password, new CreateAgentJobRequest
+                {
+                    Name = _name,
+                    Description = _description,
+                    Category = _category,
+                    Enabled = _enabled,
+                    Steps = _steps,
+                    Schedule = schedule,
+                    NotifyOperatorOnFailure = string.IsNullOrWhiteSpace(_notifyOperator) ? null : _notifyOperator
+                });
+            }
+
+            if (result.Succeeded)
+            {
+                Snackbar.Add(result.Message ?? "Saved.", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add(result.Message ?? "Failed.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

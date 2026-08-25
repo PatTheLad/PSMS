@@ -1,0 +1,132 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Activity Monitor</MudText>
+    <MudSpacer />
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">Blocking</MudText>
+<MudTable Items="_blocking" Dense="true" Hover="true" Class="psms-admin-table mb-3" Breakpoint="Breakpoint.None">
+    <HeaderContent>
+        <MudTh>SPID</MudTh>
+        <MudTh>Blocked by</MudTh>
+        <MudTh>Login</MudTh>
+        <MudTh>DB</MudTh>
+        <MudTh>Wait</MudTh>
+        <MudTh>Wait ms</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.SessionId</MudTd>
+        <MudTd>@context.BlockingSessionId</MudTd>
+        <MudTd>@context.LoginName</MudTd>
+        <MudTd>@context.Database</MudTd>
+        <MudTd>@context.WaitType</MudTd>
+        <MudTd>@context.WaitTimeMs</MudTd>
+        <MudTd>
+            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                       OnClick="() => KillAsync(context.BlockingSessionId)">Kill blocker</MudButton>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">Top sessions (from Analysis)</MudText>
+@if (Snapshot?.TopSessions is { Count: > 0 } sessions)
+{
+    <MudTable Items="sessions" Dense="true" Hover="true" Class="psms-admin-table mb-3" Breakpoint="Breakpoint.None">
+        <HeaderContent>
+            <MudTh>SPID</MudTh>
+            <MudTh>Login</MudTh>
+            <MudTh>DB</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Elapsed</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.SessionId</MudTd>
+            <MudTd>@context.LoginName</MudTd>
+            <MudTd>@context.Database</MudTd>
+            <MudTd>@context.Status</MudTd>
+            <MudTd>@context.ElapsedTimeMs</MudTd>
+            <MudTd>
+                <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                           OnClick="() => KillAsync(context.SessionId)">Kill</MudButton>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">Expensive queries (CPU)</MudText>
+<MudTable Items="_expensive" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+    <HeaderContent>
+        <MudTh>Execs</MudTh>
+        <MudTh>CPU ms</MudTh>
+        <MudTh>Duration ms</MudTh>
+        <MudTh>Reads</MudTh>
+        <MudTh>SQL</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.ExecutionCount</MudTd>
+        <MudTd>@context.TotalCpuMs.ToString("N0")</MudTd>
+        <MudTd>@context.TotalDurationMs.ToString("N0")</MudTd>
+        <MudTd>@context.TotalLogicalReads.ToString("N0")</MudTd>
+        <MudTd Style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@context.SqlText">
+            @context.SqlText
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public ServerAnalysisSnapshot? Snapshot { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private readonly List<BlockingSessionInfo> _blocking = [];
+    private readonly List<ExpensiveQueryInfo> _expensive = [];
+    private bool _loading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_expensive.Count == 0 && !_loading)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _blocking.Clear();
+            _blocking.AddRange(await Admin.GetBlockingSessionsAsync(Connection, password));
+            _expensive.Clear();
+            _expensive.AddRange(await Admin.GetExpensiveQueriesAsync(Connection, password));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task KillAsync(int sessionId)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.KillSessionAsync(Connection, password, sessionId);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+    }
+}

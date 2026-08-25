@@ -18,6 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\PSMS.Core\PSMS.Core.csproj" />
     <ProjectReference Include="..\PSMS.Providers.SqlServer\PSMS.Providers.SqlServer.csproj" />
+    <ProjectReference Include="..\PSMS.Providers.Sqlite\PSMS.Providers.Sqlite.csproj" />
+    <ProjectReference Include="..\PSMS.Providers.Access\PSMS.Providers.Access.csproj" />
   </ItemGroup>
 
   <ItemGroup>

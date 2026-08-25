@@ -1,0 +1,131 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Database properties</MudText>
+    <MudSelect T="string" Value="_database" ValueChanged="OnDbChanged" Dense="true" Style="max-width:220px" Label="Database">
+        @foreach (var db in Databases)
+        {
+            <MudSelectItem Value="@db">@db</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSpacer />
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+@if (_props is null)
+{
+    <MudText Class="mud-text-secondary pa-2">Select a database.</MudText>
+}
+else
+{
+    <MudStack Spacing="2" Class="pa-2">
+        <MudText>State: <strong>@_props.State</strong> · Recovery: <strong>@_props.RecoveryModel</strong> · Compat: <strong>@_props.CompatibilityLevel</strong></MudText>
+        <MudText>Collation: @_props.Collation · Read-only: @(_props.IsReadOnly ? "Yes" : "No")</MudText>
+        <MudStack Row="true">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => SetOnlineAsync(true)" Disabled="Busy">Online</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="() => SetOnlineAsync(false)" Disabled="Busy">Offline</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => SetReadOnlyAsync(true)" Disabled="Busy">Read only</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => SetReadOnlyAsync(false)" Disabled="Busy">Read write</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="ShrinkAsync" Disabled="Busy">Shrink</MudButton>
+        </MudStack>
+
+        <MudText Typo="Typo.subtitle2">Files</MudText>
+        <MudTable Items="_props.Files" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>Logical</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh>Size MB</MudTh>
+                <MudTh>Used MB</MudTh>
+                <MudTh>Path</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.LogicalName</MudTd>
+                <MudTd>@context.Type</MudTd>
+                <MudTd>@context.SizeMb.ToString("N1")</MudTd>
+                <MudTd>@context.UsedMb.ToString("N1")</MudTd>
+                <MudTd Style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@context.PhysicalName">
+                    @context.PhysicalName
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudStack>
+}
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public IReadOnlyList<string> Databases { get; set; } = [];
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private DatabasePropertiesInfo? _props;
+    private string _database = "master";
+    private bool _loading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Databases.Count > 0 && !Databases.Contains(_database))
+        {
+            _database = Databases[0];
+        }
+
+        if (_props is null && !_loading && !string.IsNullOrWhiteSpace(_database))
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task OnDbChanged(string db)
+    {
+        _database = db;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _props = await Admin.GetDatabasePropertiesAsync(Connection, password, _database);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SetOnlineAsync(bool online)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.SetDatabaseOnlineAsync(Connection, password, _database, online);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetReadOnlyAsync(bool readOnly)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.SetDatabaseReadOnlyAsync(Connection, password, _database, readOnly);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ShrinkAsync()
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.ShrinkDatabaseAsync(Connection, password, _database);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+        await ReloadAsync();
+    }
+}

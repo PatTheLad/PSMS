@@ -1,0 +1,190 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Operators &amp; Alerts</MudText>
+    <MudSpacer />
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
+</div>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+<div class="psms-admin-two-col">
+    <div>
+        <MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.subtitle2">Operators</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="AddOperatorAsync" Disabled="Busy">Add</MudButton>
+        </MudStack>
+        <MudTable Items="_operators" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>Enabled</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Name</MudTd>
+                <MudTd>@context.EmailAddress</MudTd>
+                <MudTd>@(context.Enabled ? "Yes" : "No")</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="() => DeleteOperatorAsync(context)" Disabled="Busy" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        @if (!_loading && _showOpForm)
+        {
+            <MudPaper Class="pa-3 mt-2" Style="background:var(--psms-panel-2)">
+                <MudStack Spacing="2">
+                    <MudTextField @bind-Value="_op.Name" Label="Operator name" Immediate="true" />
+                    <MudTextField @bind-Value="_op.EmailAddress" Label="Email" Immediate="true" />
+                    <MudTextField @bind-Value="_op.PagerAddress" Label="Pager (optional)" Immediate="true" />
+                    <MudStack Row="true">
+                        <MudButton Size="Size.Small" OnClick="() => _showOpForm = false">Cancel</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveOperatorAsync">Save</MudButton>
+                    </MudStack>
+                </MudStack>
+            </MudPaper>
+        }
+    </div>
+    <div>
+        <MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.subtitle2">Alerts</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="AddAlertAsync" Disabled="Busy">Add</MudButton>
+        </MudStack>
+        <MudTable Items="_alerts" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Severity</MudTh>
+                <MudTh>Message</MudTh>
+                <MudTh>Job</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Name</MudTd>
+                <MudTd>@(context.Severity?.ToString() ?? "—")</MudTd>
+                <MudTd>@(context.MessageId?.ToString() ?? "—")</MudTd>
+                <MudTd>@context.JobName</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="() => DeleteAlertAsync(context)" Disabled="Busy" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        @if (!_loading && _showAlertForm)
+        {
+            <MudPaper Class="pa-3 mt-2" Style="background:var(--psms-panel-2)">
+                <MudStack Spacing="2">
+                    <MudTextField @bind-Value="_alert.Name" Label="Alert name" Immediate="true" />
+                    <MudNumericField T="int?" @bind-Value="_alert.Severity" Label="Severity (e.g. 16)" Min="1" Max="25" />
+                    <MudNumericField T="int?" @bind-Value="_alert.MessageId" Label="Message ID (optional)" />
+                    <MudTextField @bind-Value="_alert.DatabaseName" Label="Database (optional)" />
+                    <MudTextField @bind-Value="_alert.NotifyOperatorName" Label="Notify operator" />
+                    <MudTextField @bind-Value="_alert.JobNameToRun" Label="Job to run (optional)" />
+                    <MudStack Row="true">
+                        <MudButton Size="Size.Small" OnClick="() => _showAlertForm = false">Cancel</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAlertAsync">Save</MudButton>
+                    </MudStack>
+                </MudStack>
+            </MudPaper>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public bool Busy { get; set; }
+
+    private readonly List<AgentOperatorInfo> _operators = [];
+    private readonly List<AgentAlertInfo> _alerts = [];
+    private CreateAgentOperatorRequest _op = new();
+    private CreateAgentAlertRequest _alert = new() { Severity = 16 };
+    private bool _loading;
+    private bool _showOpForm;
+    private bool _showAlertForm;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_operators.Count == 0 && _alerts.Count == 0 && !_loading)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _operators.Clear();
+            _operators.AddRange(await Admin.GetAgentOperatorsAsync(Connection, password));
+            _alerts.Clear();
+            _alerts.AddRange(await Admin.GetAgentAlertsAsync(Connection, password));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void AddOperatorAsync()
+    {
+        _op = new CreateAgentOperatorRequest();
+        _showOpForm = true;
+    }
+
+    private void AddAlertAsync()
+    {
+        _alert = new CreateAgentAlertRequest { Severity = 16 };
+        _showAlertForm = true;
+    }
+
+    private async Task SaveOperatorAsync()
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.CreateAgentOperatorAsync(Connection, password, _op);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        if (result.Succeeded)
+        {
+            _showOpForm = false;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task SaveAlertAsync()
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.CreateAgentAlertAsync(Connection, password, _alert);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Success : Severity.Error);
+        if (result.Succeeded)
+        {
+            _showAlertForm = false;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task DeleteOperatorAsync(AgentOperatorInfo op)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.DeleteAgentOperatorAsync(Connection, password, op.Name);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAlertAsync(AgentAlertInfo alert)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var result = await Admin.DeleteAgentAlertAsync(Connection, password, alert.Name);
+        Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+        await ReloadAsync();
+    }
+}

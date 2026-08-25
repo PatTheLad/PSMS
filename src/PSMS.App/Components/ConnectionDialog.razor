@@ -8,18 +8,40 @@
     <DialogContent>
         <MudStack Spacing="2">
             <MudTextField @bind-Value="_model.Name" Label="Connection name" Required="true" />
-            <MudTextField @bind-Value="_model.Server" Label="Server" Required="true" HelperText="e.g. localhost or .\SQLEXPRESS" />
-            <MudNumericField T="int?" @bind-Value="_model.Port" Label="Port (optional)" Min="1" Max="65535" />
-            <MudTextField @bind-Value="_model.Database" Label="Default database" HelperText="Optional; defaults to master" />
-            <MudSwitch @bind-Value="_model.UseWindowsAuth" Label="@AuthLabel" Color="Color.Primary" />
-            @if (!_model.UseWindowsAuth)
+            <MudSelect T="DbEngine" @bind-Value="_model.Engine" Label="Engine" Dense="true">
+                <MudSelectItem Value="DbEngine.SqlServer">SQL Server</MudSelectItem>
+                <MudSelectItem Value="DbEngine.Sqlite">SQLite</MudSelectItem>
+                @if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    <MudSelectItem Value="DbEngine.Access">Access</MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (_model.Engine == DbEngine.SqlServer)
             {
-                <MudTextField @bind-Value="_model.UserName" Label="Login" Required="true" />
-                <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password"
-                              HelperText="Leave blank when editing to keep the stored password" />
+                <MudTextField @bind-Value="_model.Server" Label="Server" Required="true" HelperText="e.g. localhost or .\SQLEXPRESS" />
+                <MudNumericField T="int?" @bind-Value="_model.Port" Label="Port (optional)" Min="1" Max="65535" />
+                <MudTextField @bind-Value="_model.Database" Label="Default database" HelperText="Optional; defaults to master" />
+                <MudSwitch @bind-Value="_model.UseWindowsAuth" Label="@AuthLabel" Color="Color.Primary" />
+                @if (!_model.UseWindowsAuth)
+                {
+                    <MudTextField @bind-Value="_model.UserName" Label="Login" Required="true" />
+                    <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password"
+                                  HelperText="Leave blank when editing to keep the stored password" />
+                }
+                <MudSwitch @bind-Value="_model.Encrypt" Label="Encrypt" Color="Color.Primary" />
+                <MudSwitch @bind-Value="_model.TrustServerCertificate" Label="Trust server certificate" Color="Color.Primary" />
             }
-            <MudSwitch @bind-Value="_model.Encrypt" Label="Encrypt" Color="Color.Primary" />
-            <MudSwitch @bind-Value="_model.TrustServerCertificate" Label="Trust server certificate" Color="Color.Primary" />
+            else
+            {
+                <MudTextField @bind-Value="_model.Database" Label="Database file path" Required="true"
+                              HelperText="@(_model.Engine == DbEngine.Sqlite ? "Path to .db / .sqlite file" : "Path to .accdb / .mdb file")" />
+                <MudTextField @bind-Value="_model.Server" Label="Display / alternate path (optional)" />
+                @if (_model.Engine == DbEngine.Access)
+                {
+                    <MudTextField @bind-Value="_password" Label="Database password (optional)" InputType="InputType.Password" />
+                }
+            }
         </MudStack>
     </DialogContent>
     <DialogActions>
@@ -48,7 +70,7 @@
         {
             Id = Connection.Id,
             Name = string.IsNullOrWhiteSpace(Connection.Name) ? "SQL Server" : Connection.Name,
-            Engine = DbEngine.SqlServer,
+            Engine = Connection.Engine,
             Server = Connection.Server,
             Database = Connection.Database,
             UseWindowsAuth = Connection.UseWindowsAuth && RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
@@ -62,6 +84,10 @@
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             _model.UseWindowsAuth = false;
+            if (_model.Engine == DbEngine.Access)
+            {
+                _model.Engine = DbEngine.SqlServer;
+            }
         }
     }
 
@@ -73,7 +99,7 @@
         try
         {
             var password = ResolvePasswordForUse();
-            var provider = ProviderFactory.GetProvider(DbEngine.SqlServer);
+            var provider = ProviderFactory.GetProvider(_model.Engine);
             await provider.TestConnectionAsync(_model, password);
             Snackbar.Add("Connection succeeded.", Severity.Success);
         }
@@ -89,22 +115,44 @@
 
     private async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(_model.Name) || string.IsNullOrWhiteSpace(_model.Server))
+        if (string.IsNullOrWhiteSpace(_model.Name))
         {
-            Snackbar.Add("Name and server are required.", Severity.Warning);
+            Snackbar.Add("Name is required.", Severity.Warning);
             return;
         }
 
-        if (!_model.UseWindowsAuth && string.IsNullOrWhiteSpace(_model.UserName))
+        if (_model.Engine == DbEngine.SqlServer)
         {
-            Snackbar.Add("Login is required for SQL authentication.", Severity.Warning);
+            if (string.IsNullOrWhiteSpace(_model.Server))
+            {
+                Snackbar.Add("Server is required.", Severity.Warning);
+                return;
+            }
+
+            if (!_model.UseWindowsAuth && string.IsNullOrWhiteSpace(_model.UserName))
+            {
+                Snackbar.Add("Login is required for SQL authentication.", Severity.Warning);
+                return;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(_model.Database) && string.IsNullOrWhiteSpace(_model.Server))
+        {
+            Snackbar.Add("Database file path is required.", Severity.Warning);
             return;
         }
 
         _busy = true;
         try
         {
-            _model.Engine = DbEngine.SqlServer;
+            if (_model.Engine != DbEngine.SqlServer)
+            {
+                _model.UseWindowsAuth = false;
+                if (string.IsNullOrWhiteSpace(_model.Server) && !string.IsNullOrWhiteSpace(_model.Database))
+                {
+                    _model.Server = _model.Database;
+                }
+            }
+
             await Store.SaveAsync(_model, _model.UseWindowsAuth ? null : _password);
             Sessions.NotifyConnectionsChanged();
             Snackbar.Add("Connection saved.", Severity.Success);

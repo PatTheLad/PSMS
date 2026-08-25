@@ -1,0 +1,202 @@
+@inject IExtendedEventsService Profiler
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+@implements IAsyncDisposable
+
+<div class="psms-admin-toolbar">
+    <MudText Typo="Typo.subtitle2">Profiler (Extended Events)</MudText>
+    <MudSpacer />
+    @if (_running)
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Live · @_events.Count events</MudChip>
+        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" OnClick="StopAsync" Disabled="Busy">Stop</MudButton>
+    }
+    else
+    {
+        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" OnClick="StartAsync" Disabled="Busy || _starting">Start</MudButton>
+    }
+    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ScriptAsync" Disabled="Busy">Script</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearEvents" Disabled="_events.Count == 0">Clear</MudButton>
+</div>
+
+<div class="psms-profiler-filters">
+    <MudSelect T="string" @bind-Value="_request.TemplateId" Label="Template" Dense="true" Style="max-width:220px" Disabled="_running">
+        @foreach (var t in Profiler.GetTemplates())
+        {
+            <MudSelectItem Value="@t.Id">@t.Name</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTextField @bind-Value="_request.SessionName" Label="Session" Margin="Margin.Dense" Style="max-width:160px" Disabled="_running" />
+    <MudTextField @bind-Value="_request.DatabaseName" Label="Database filter" Margin="Margin.Dense" Style="max-width:140px" Disabled="_running" />
+    <MudTextField @bind-Value="_request.LoginName" Label="Login filter" Margin="Margin.Dense" Style="max-width:140px" Disabled="_running" />
+    <MudNumericField T="int" @bind-Value="_request.MinDurationMs" Label="Min ms" Margin="Margin.Dense" Style="max-width:100px" Disabled="_running" Min="0" />
+    <MudSwitch @bind-Value="_request.ExcludeSystem" Label="Exclude system" Color="Color.Primary" Disabled="_running" />
+</div>
+
+<MudTable Items="_events" Dense="true" Hover="true" Class="psms-admin-table psms-profiler-grid" Breakpoint="Breakpoint.None"
+          T="ProfilerEvent" OnRowClick="OnRowClick" Height="360px" Virtualize="true">
+    <HeaderContent>
+        <MudTh>Time</MudTh>
+        <MudTh>Event</MudTh>
+        <MudTh>DB</MudTh>
+        <MudTh>Login</MudTh>
+        <MudTh>ms</MudTh>
+        <MudTh>SPID</MudTh>
+        <MudTh>SQL</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff")</MudTd>
+        <MudTd>@context.EventName</MudTd>
+        <MudTd>@context.DatabaseName</MudTd>
+        <MudTd>@context.LoginName</MudTd>
+        <MudTd>@context.DurationMs</MudTd>
+        <MudTd>@context.SessionId</MudTd>
+        <MudTd Style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@context.SqlText">
+            @context.SqlText
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@if (_selected is not null)
+{
+    <MudText Typo="Typo.subtitle2" Class="mt-2 mb-1">Selected statement</MudText>
+    <pre class="psms-code-block">@_selected.SqlText</pre>
+}
+
+@code {
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<string> OnOpenSql { get; set; }
+
+    private readonly StartProfilerSessionRequest _request = new();
+    private readonly List<ProfilerEvent> _events = [];
+    private ProfilerEvent? _selected;
+    private bool _running;
+    private bool _starting;
+    private CancellationTokenSource? _pollCts;
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+
+    protected override void OnInitialized()
+    {
+        _request.SessionName = "psms_profiler";
+        _request.TemplateId = "tsql_duration";
+        _request.ExcludeSystem = true;
+    }
+
+    private async Task StartAsync()
+    {
+        _starting = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Profiler.StartSessionAsync(Connection, password, _request);
+            if (!result.Succeeded)
+            {
+                Snackbar.Add(result.Message ?? "Failed to start", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add(result.Message ?? "Started", Severity.Success);
+            _running = true;
+            _events.Clear();
+            _seen.Clear();
+            _pollCts = new CancellationTokenSource();
+            _ = PollLoopAsync(_pollCts.Token);
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        _pollCts?.Cancel();
+        _running = false;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            await Profiler.StopSessionAsync(Connection, password, _request.SessionName);
+            await Profiler.DropSessionAsync(Connection, password, _request.SessionName);
+            Snackbar.Add("Profiler stopped.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+                var batch = await Profiler.ReadEventsAsync(Connection, password, _request.SessionName, ct);
+                var added = false;
+                foreach (var ev in batch)
+                {
+                    var key = $"{ev.Timestamp:O}|{ev.EventName}|{ev.SessionId}|{ev.SqlText}";
+                    if (_seen.Add(key))
+                    {
+                        _events.Insert(0, ev);
+                        added = true;
+                    }
+                }
+
+                if (_events.Count > 2000)
+                {
+                    _events.RemoveRange(2000, _events.Count - 2000);
+                }
+
+                if (added)
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch
+            {
+                // keep polling
+            }
+
+            try
+            {
+                await Task.Delay(1000, ct);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task ScriptAsync()
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var script = await Profiler.ScriptSessionAsync(Connection, password, _request);
+        await OnOpenSql.InvokeAsync(script);
+    }
+
+    private void ClearEvents()
+    {
+        _events.Clear();
+        _seen.Clear();
+        _selected = null;
+    }
+
+    private void OnRowClick(TableRowClickEventArgs<ProfilerEvent> args)
+    {
+        _selected = args.Item;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_running)
+        {
+            try { await StopAsync(); } catch { /* */ }
+        }
+
+        _pollCts?.Dispose();
+    }
+}

@@ -5,6 +5,8 @@ using Photino.Blazor;
 using PSMS.App.Services;
 using PSMS.Core.Abstractions;
 using PSMS.Core.Storage;
+using PSMS.Providers.Access;
+using PSMS.Providers.Sqlite;
 using PSMS.Providers.SqlServer;
 
 namespace PSMS.App;
@@ -20,7 +22,10 @@ internal static class Program
         appBuilder.Services.AddMudServices();
         appBuilder.Services.AddSingleton<IConnectionStore, FileConnectionStore>();
         appBuilder.Services.AddSingleton<IDbProvider, SqlServerProvider>();
+        appBuilder.Services.AddSingleton<IDbProvider, SqliteProvider>();
+        appBuilder.Services.AddSingleton<IDbProvider, AccessProvider>();
         appBuilder.Services.AddSingleton<ISqlServerAdminService, SqlServerAdminService>();
+        appBuilder.Services.AddSingleton<IExtendedEventsService, SqlServerExtendedEventsService>();
         appBuilder.Services.AddSingleton<IDbProviderFactory, DbProviderFactory>();
         appBuilder.Services.AddSingleton<ActiveSessionService>();
         appBuilder.Services.AddSingleton<QueryRunner>();

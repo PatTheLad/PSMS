@@ -1,6 +1,8 @@
 @inject ISqlServerAdminService Admin
 @inject IConnectionStore Store
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject ActiveSessionService Sessions
 
 <div class="psms-admin-toolbar">
     <MudChip T="string" Size="Size.Small" Color="@StatusColor" Variant="Variant.Filled">@_status.StatusText</MudChip>
@@ -9,8 +11,10 @@
         <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">@_status.Detail</MudText>
     }
     <MudSpacer />
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               Disabled="_loading || Busy" OnClick="NewJobAsync">New job</MudButton>
     <MudTextField @bind-Value="_filter" Immediate="true" Margin="Margin.Dense" Variant="Variant.Outlined"
-                  Placeholder="Filter jobs…" Style="max-width:220px" Adornment="Adornment.Start"
+                  Placeholder="Filter jobs…" Style="max-width:200px" Adornment="Adornment.Start"
                   AdornmentIcon="@Icons.Material.Filled.Search" />
     <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_loading || Busy" OnClick="ReloadAsync" />
 </div>
@@ -51,14 +55,19 @@
                                    title="Start" Disabled="_acting || Busy" OnClick="() => StartAsync(context)" />
                     <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small" Color="Color.Error"
                                    title="Stop" Disabled="_acting || Busy" OnClick="() => StopAsync(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   title="Edit" Disabled="_acting || Busy" OnClick="() => EditJobAsync(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Code" Size="Size.Small"
+                                   title="Script" Disabled="_acting || Busy" OnClick="() => ScriptJobAsync(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   title="Delete" Disabled="_acting || Busy" OnClick="() => DeleteJobAsync(context)" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
         @if (!_loading && _jobs.Count == 0)
         {
             <MudAlert Severity="Severity.Info" Class="ma-2" Dense="true">
-                No Agent jobs found. On Linux SQL Server, enable Agent (`mssql-conf set sqlagent.enabled true` and restart)
-                then create jobs in msdb — PSMS can start/stop/history them.
+                No Agent jobs found. Create one with <strong>New job</strong>, or enable SQL Agent on the server.
             </MudAlert>
         }
     </div>
@@ -66,7 +75,7 @@
     <div class="psms-agent-detail">
         @if (_selected is null)
         {
-            <MudText Class="pa-4 mud-text-secondary">Select a job to inspect steps and history.</MudText>
+            <MudText Class="pa-4 mud-text-secondary">Select a job to inspect steps, schedules, and history.</MudText>
         }
         else
         {
@@ -107,6 +116,22 @@
                 </MudExpansionPanels>
             }
 
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Schedules</MudText>
+            <MudTable Items="_schedules" Dense="true" Hover="true" Class="mb-3 psms-admin-table" Breakpoint="Breakpoint.None">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Frequency</MudTh>
+                    <MudTh>Enabled</MudTh>
+                    <MudTh>Next</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.Name</MudTd>
+                    <MudTd>@context.FrequencyDescription</MudTd>
+                    <MudTd>@(context.Enabled ? "Yes" : "No")</MudTd>
+                    <MudTd>@(context.NextRun?.LocalDateTime.ToString("g") ?? "—")</MudTd>
+                </RowTemplate>
+            </MudTable>
+
             <MudText Typo="Typo.subtitle2" Class="mb-1">History</MudText>
             <MudTable Items="_history" Dense="true" Hover="true" Class="psms-admin-table" Breakpoint="Breakpoint.None">
                 <HeaderContent>
@@ -138,6 +163,7 @@
     private readonly List<AgentJobInfo> _jobs = [];
     private readonly List<AgentJobStepInfo> _steps = [];
     private readonly List<AgentJobHistoryEntry> _history = [];
+    private readonly List<AgentJobScheduleInfo> _schedules = [];
     private AgentServiceStatus _status = new() { StatusText = "…" };
     private AgentJobInfo? _selected;
     private string _filter = string.Empty;
@@ -192,6 +218,7 @@
                     _selected = null;
                     _steps.Clear();
                     _history.Clear();
+                    _schedules.Clear();
                 }
             }
         }
@@ -217,6 +244,8 @@
             _steps.AddRange(await Admin.GetAgentJobStepsAsync(Connection, password, job.JobId));
             _history.Clear();
             _history.AddRange(await Admin.GetAgentJobHistoryAsync(Connection, password, job.JobId));
+            _schedules.Clear();
+            _schedules.AddRange(await Admin.GetAgentJobSchedulesAsync(Connection, password, job.JobId));
         }
         catch (Exception ex)
         {
@@ -224,6 +253,75 @@
         }
 
         StateHasChanged();
+    }
+
+    private async Task NewJobAsync()
+    {
+        var parameters = new DialogParameters<JobDesignerDialog>
+        {
+            { x => x.Connection, Connection }
+        };
+        var dialog = await DialogService.ShowAsync<JobDesignerDialog>("New Agent job", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
+        }
+    }
+
+    private async Task EditJobAsync(AgentJobInfo job)
+    {
+        var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+        var steps = await Admin.GetAgentJobStepsAsync(Connection, password, job.JobId);
+        var parameters = new DialogParameters<JobDesignerDialog>
+        {
+            { x => x.Connection, Connection },
+            { x => x.Existing, job },
+            { x => x.ExistingSteps, steps }
+        };
+        var dialog = await DialogService.ShowAsync<JobDesignerDialog>($"Edit — {job.Name}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
+        }
+    }
+
+    private async Task DeleteJobAsync(AgentJobInfo job)
+    {
+        _acting = true;
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var result = await Admin.DeleteAgentJobAsync(Connection, password, job.Name);
+            Snackbar.Add(result.Message ?? "", result.Succeeded ? Severity.Info : Severity.Error);
+            await ReloadAsync();
+            await OnStatusChanged.InvokeAsync();
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private async Task ScriptJobAsync(AgentJobInfo job)
+    {
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var script = await Admin.ScriptAgentJobAsync(Connection, password, job.JobId);
+            Sessions.OpenQueryTab(Connection, "msdb", script, $"Script {job.Name}");
+            Sessions.ShowQueries();
+            Snackbar.Add("Job script opened in a query tab.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
     }
 
     private async Task StartAsync(AgentJobInfo job)
