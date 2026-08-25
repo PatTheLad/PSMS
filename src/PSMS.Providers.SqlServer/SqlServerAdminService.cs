@@ -119,11 +119,31 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
             conn.InfoMessage += (_, e) => messages.Add(e.Message);
 
-            // CREATE first, then size/recovery — file logical names may differ on some installs
-            await using (var create = new SqlCommand($"CREATE DATABASE {QuoteIdent(request.Name)}{collationClause};", conn))
+            // CREATE can briefly fail with exclusive lock on model under concurrent load — retry.
+            Exception? lastCreateError = null;
+            for (var attempt = 1; attempt <= 5; attempt++)
             {
-                create.CommandTimeout = 120;
-                await create.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await using var create = new SqlCommand($"CREATE DATABASE {QuoteIdent(request.Name)}{collationClause};", conn)
+                    {
+                        CommandTimeout = 120
+                    };
+                    await create.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    lastCreateError = null;
+                    break;
+                }
+                catch (SqlException ex) when (ex.Number is 1807 or 5030 or 1205 || ex.Message.Contains("exclusive lock on database 'model'", StringComparison.OrdinalIgnoreCase))
+                {
+                    lastCreateError = ex;
+                    messages.Add($"Create attempt {attempt}/5 waiting on model lock…");
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            if (lastCreateError is not null)
+            {
+                throw lastCreateError;
             }
 
             await using (var alterRec = new SqlCommand($"ALTER DATABASE {QuoteIdent(request.Name)} SET RECOVERY {recovery};", conn))
