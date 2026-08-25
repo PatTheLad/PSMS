@@ -115,6 +115,9 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
 
         try
         {
+            // Pooled IntelliSense connections can hold shared locks on model and block CREATE.
+            SqlConnection.ClearAllPools();
+
             await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
             conn.InfoMessage += (_, e) => messages.Add(e.Message);
@@ -125,6 +128,11 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
             {
                 try
                 {
+                    if (attempt > 1)
+                    {
+                        SqlConnection.ClearAllPools();
+                    }
+
                     await using var create = new SqlCommand($"CREATE DATABASE {QuoteIdent(request.Name)}{collationClause};", conn)
                     {
                         CommandTimeout = 120
@@ -137,7 +145,7 @@ public sealed class SqlServerAdminService : ISqlServerAdminService
                 {
                     lastCreateError = ex;
                     messages.Add($"Create attempt {attempt}/5 waiting on model lock…");
-                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(400 * attempt), cancellationToken).ConfigureAwait(false);
                 }
             }
 

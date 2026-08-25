@@ -154,6 +154,8 @@ public sealed class SchemaIntelliSenseService
         var bag = new ConcurrentBag<CatalogObjectInfo>();
         var others = databases
             .Where(d => !string.Equals(d, activeDatabase, StringComparison.OrdinalIgnoreCase))
+            .Where(d => !d.Equals("tempdb", StringComparison.OrdinalIgnoreCase)
+                        && !d.Equals("model", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         await Parallel.ForEachAsync(
