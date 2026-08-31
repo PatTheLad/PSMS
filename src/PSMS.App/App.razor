@@ -1,6 +1,7 @@
 @inject ActiveSessionService Sessions
 @inject QueryRunner QueryRunner
 @inject IConnectionStore Store
+@inject IDbProviderFactory ProviderFactory
 @inject IFileDialogService FileDialogs
 @inject EditorRegistry Editors
 @inject SchemaIntelliSenseService IntelliSense
@@ -9,7 +10,9 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject UiLayoutStore LayoutStore
+@inject SessionStore SessionStore
 @using PSMS.Core.Storage
+@using PSMS.Core.Sql
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -37,6 +40,8 @@
                        Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AccountTree"
                        Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Est. plan</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AccountTree"
+                       Disabled="@(!CanExecute)" OnClick="ActualPlanAsync" title="Actual plan (runs the query)">Act. plan</MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                        Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy"
@@ -65,22 +70,23 @@
             <aside class="psms-explorer">
                 <ObjectExplorer @ref="_explorer"
                                 OnOpenQuery="HandleOpenQuery"
+                                OnEditTopN="HandleEditTopNAsync"
                                 OnEditConnection="EditConnection"
                                 OnRequestNewConnection="OpenNewConnection" />
             </aside>
             <div class="psms-vsplit @( _draggingExplorer ? "active" : null )"
                  @onmousedown="StartExplorerDrag"></div>
             <section class="psms-main @(Sessions.ShowAdminWorkspace ? "psms-main-admin" : null)">
-                @if (Sessions.ShowAdminWorkspace)
-                {
-                    <AdminWorkspace />
-                }
-                else
-                {
+                @* Keep query/results mounted so Admin toggle does not wipe editors *@
+                <div class="psms-main-queries @(Sessions.ShowAdminWorkspace ? "psms-hidden" : null)">
                     <QueryWorkspace @ref="_workspace" />
                     <div class="psms-hsplit @( _draggingEditor ? "active" : null )"
                          @onmousedown="StartEditorDrag"></div>
                     <ResultsPane @ref="_results" />
+                </div>
+                @if (Sessions.ShowAdminWorkspace)
+                {
+                    <AdminWorkspace />
                 }
             </section>
         </div>
@@ -106,6 +112,7 @@
                     OnRequestSnippets="OpenSnippetsAsync"
                     OnRequestDuplicate="DuplicateTab"
                     OnRequestEstimatedPlan="EstimatedPlanAsync"
+                    OnRequestActualPlan="ActualPlanAsync"
                     OnRequestCloseTab="CloseActiveTabAsync"
                     OnOpenQuery="HandleOpenQuery" />
 </div>
@@ -206,10 +213,10 @@
     protected override void OnInitialized()
     {
         Sessions.Changed += OnSessionsChanged;
-        _ = LoadLayoutAsync();
+        _ = LoadLayoutAndSessionAsync();
     }
 
-    private async Task LoadLayoutAsync()
+    private async Task LoadLayoutAndSessionAsync()
     {
         try
         {
@@ -217,12 +224,70 @@
             Sessions.ExplorerWidth = layout.ExplorerWidth;
             Sessions.EditorRatio = layout.EditorRatio;
             await ApplyLayoutToDomAsync();
+
+            var snap = await SessionStore.LoadAsync();
+            if (snap.Tabs.Count > 0)
+            {
+                var known = (await Store.GetAllAsync()).Select(c => c.Id).ToHashSet();
+                var tabs = snap.Tabs
+                    .Where(t => known.Contains(t.ConnectionId))
+                    .Select(t => new QueryTab
+                    {
+                        // Id is get-only — recreate with same content; new Guids are fine
+                        Title = t.Title,
+                        ConnectionId = t.ConnectionId,
+                        Database = t.Database,
+                        Sql = t.Sql,
+                        FilePath = t.FilePath,
+                        IsDirty = t.IsDirty
+                    })
+                    .ToList();
+
+                // Preserve active by matching title+connection when ids differ
+                Guid? active = null;
+                if (snap.ActiveTabId is Guid oldActive)
+                {
+                    var old = snap.Tabs.FirstOrDefault(t => t.Id == oldActive);
+                    if (old is not null)
+                    {
+                        var match = tabs.FirstOrDefault(t =>
+                            t.ConnectionId == old.ConnectionId
+                            && t.Database == old.Database
+                            && t.Title == old.Title);
+                        active = match?.Id;
+                    }
+                }
+
+                if (tabs.Count > 0)
+                {
+                    Sessions.RestoreTabs(tabs, active);
+                }
+            }
+
             await InvokeAsync(StateHasChanged);
         }
         catch
         {
             // keep defaults
         }
+    }
+
+    private void ScheduleSessionSave()
+    {
+        SessionStore.ScheduleSave(() => new SessionSnapshot
+        {
+            ActiveTabId = Sessions.ActiveTabId,
+            Tabs = Sessions.Tabs.Select(t => new SessionTabSnapshot
+            {
+                Id = t.Id,
+                ConnectionId = t.ConnectionId,
+                Database = t.Database,
+                Sql = t.Sql,
+                Title = t.Title,
+                FilePath = t.FilePath,
+                IsDirty = t.IsDirty
+            }).ToList()
+        });
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -236,7 +301,28 @@
         }
     }
 
-    private void OnSessionsChanged() => InvokeAsync(StateHasChanged);
+    private void OnSessionsChanged()
+    {
+        _ = FlushAndSaveSessionAsync();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task FlushAndSaveSessionAsync()
+    {
+        try
+        {
+            if (Sessions.ActiveTab is { } tab)
+            {
+                tab.Sql = await Editors.GetSqlAsync(tab.Id) ?? tab.Sql;
+            }
+        }
+        catch
+        {
+            // editor may not be ready
+        }
+
+        ScheduleSessionSave();
+    }
 
     private void RecoverUi() => _errorBoundary?.Recover();
 
@@ -303,6 +389,12 @@
         if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("l", StringComparison.OrdinalIgnoreCase) && !e.ShiftKey)
         {
             await EstimatedPlanAsync();
+            return;
+        }
+
+        if ((e.CtrlKey || e.MetaKey) && e.ShiftKey && e.Key.Equals("l", StringComparison.OrdinalIgnoreCase))
+        {
+            await ActualPlanAsync();
             return;
         }
 
@@ -469,6 +561,7 @@
 
     private void HandleOpenQuery((ConnectionDefinition Connection, string Database, string? Sql, string? Title) args)
     {
+        Sessions.ShowQueries();
         Sessions.OpenQueryTab(args.Connection, args.Database, args.Sql, args.Title);
     }
 
@@ -620,6 +713,100 @@
         }
 
         await _workspace.ExecuteEstimatedPlanAsync();
+    }
+
+    private async Task ActualPlanAsync()
+    {
+        if (_workspace is null)
+        {
+            Snackbar.Add("Query workspace is not ready.", Severity.Warning);
+            return;
+        }
+
+        await _workspace.ExecuteActualPlanAsync();
+    }
+
+    private async Task HandleEditTopNAsync((ConnectionDefinition Connection, string Database, string Schema, string Table) args)
+    {
+        Sessions.ShowQueries();
+        var password = args.Connection.UseWindowsAuth ? null : Store.DecryptPassword(args.Connection);
+        var provider = ProviderFactory.GetProvider(args.Connection.Engine);
+
+        IReadOnlyList<string> keyCols = [];
+        try
+        {
+            var overview = await provider.GetTableSchemaOverviewAsync(
+                args.Connection, password, args.Database, args.Schema, args.Table);
+            var pk = overview.Indexes.FirstOrDefault(i => i.IsPrimaryKey);
+            if (pk is not null)
+            {
+                keyCols = pk.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            }
+        }
+        catch
+        {
+            // proceed without keys — WHERE will use all columns
+        }
+
+        var sql = BuildEditTopSql(args.Connection.Engine, args.Schema, args.Table, 200);
+        var tab = Sessions.OpenQueryTab(
+            args.Connection,
+            args.Database,
+            sql,
+            $"Edit {args.Schema}.{args.Table}");
+
+        tab.IsExecuting = true;
+        Sessions.ViewLiveResults();
+        Sessions.Notify();
+        try
+        {
+            var result = await QueryRunner.ExecuteAsync(args.Connection, args.Database, sql);
+            result.EditContext = new EditableResultContext
+            {
+                ConnectionId = args.Connection.Id,
+                Database = args.Database,
+                Schema = args.Schema,
+                Table = args.Table,
+                Engine = args.Connection.Engine,
+                KeyColumns = keyCols
+            };
+            tab.LastResult = result;
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                Snackbar.Add(result.Error, Severity.Error);
+            }
+            else
+            {
+                var hint = keyCols.Count > 0
+                    ? $"Edit Top 200 — double-click cells, then Script UPDATEs (PK: {string.Join(", ", keyCols)})."
+                    : "Edit Top 200 — no PK found; UPDATEs will match on all column values.";
+                Snackbar.Add(hint, Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            tab.LastResult = new QueryResult { Error = ex.Message, Messages = [ex.Message] };
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            tab.IsExecuting = false;
+            Sessions.Notify();
+        }
+    }
+
+    private static string BuildEditTopSql(DbEngine engine, string schema, string table, int n)
+    {
+        var qualified = engine == DbEngine.SqlServer
+            ? $"[{schema}].[{table}]"
+            : string.IsNullOrWhiteSpace(schema) || schema is "main" or "dbo"
+                ? $"\"{table.Replace("\"", "\"\"")}\""
+                : $"\"{schema.Replace("\"", "\"\"")}\".\"{table.Replace("\"", "\"\"")}\"";
+        return engine switch
+        {
+            DbEngine.SqlServer => $"SELECT TOP ({n}) *{System.Environment.NewLine}FROM {qualified};",
+            _ => $"SELECT *{System.Environment.NewLine}FROM {qualified}{System.Environment.NewLine}LIMIT {n};"
+        };
     }
 
     private void Cancel() => QueryRunner.Cancel();

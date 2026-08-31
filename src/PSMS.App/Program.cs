@@ -31,6 +31,7 @@ internal static class Program
         appBuilder.Services.AddSingleton<QueryHistoryStore>();
         appBuilder.Services.AddSingleton<SnippetStore>();
         appBuilder.Services.AddSingleton<UiLayoutStore>();
+        appBuilder.Services.AddSingleton<SessionStore>();
         appBuilder.Services.AddSingleton<IDbProvider, SqlServerProvider>();
         appBuilder.Services.AddSingleton<IDbProvider, SqliteProvider>();
         appBuilder.Services.AddSingleton<IDbProvider, AccessProvider>();

@@ -119,4 +119,30 @@ public sealed class QueryRunner
         return await provider.ExecuteEstimatedPlanAsync(connection, password, database, sql, token)
             .ConfigureAwait(false);
     }
+
+    /// <summary>SQL Server only: STATISTICS PROFILE — runs the query and returns the actual plan.</summary>
+    public async Task<QueryResult> ExecuteActualPlanAsync(
+        ConnectionDefinition connection,
+        string database,
+        string sql,
+        CancellationToken externalToken = default)
+    {
+        if (connection.Engine != DbEngine.SqlServer)
+        {
+            return new QueryResult
+            {
+                Error = "Actual execution plan is only available for SQL Server.",
+                Messages = ["Actual execution plan is only available for SQL Server."]
+            };
+        }
+
+        Cancel();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+        var token = _cts.Token;
+
+        var password = connection.UseWindowsAuth ? null : _store.DecryptPassword(connection);
+        var provider = _factory.GetProvider(connection.Engine);
+        return await provider.ExecuteActualPlanAsync(connection, password, database, sql, token)
+            .ConfigureAwait(false);
+    }
 }

@@ -47,4 +47,12 @@ public interface IDbProvider
         string database,
         string sql,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Actual plan (SQL Server STATISTICS PROFILE — executes the query). Other engines return a not-supported result.</summary>
+    Task<QueryResult> ExecuteActualPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default);
 }

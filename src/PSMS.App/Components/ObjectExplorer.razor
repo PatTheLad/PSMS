@@ -146,11 +146,64 @@
                                                                                 }
                                                                                 else if (_columns.TryGetValue(Key(connection.Id, db.Name, schema.Name, table.Name), out var columns))
                                                                                 {
-                                                                                    @foreach (var col in columns)
+                                                                                    <MudTreeViewItem Value="@($"colfold:{tableKey}")" Text="@($"Columns ({columns.Count})")" Icon="@Icons.Material.Filled.ViewColumn" Expanded="true">
+                                                                                        <ChildContent>
+                                                                                            @foreach (var col in columns)
+                                                                                            {
+                                                                                                <MudTreeViewItem Value="@($"col:{tableKey}:{col.Name}")"
+                                                                                                                 Text="@($"{col.Name} ({col.DataType})")"
+                                                                                                                 Icon="@Icons.Material.Filled.ViewColumn" />
+                                                                                            }
+                                                                                        </ChildContent>
+                                                                                    </MudTreeViewItem>
+
+                                                                                    @if (_indexes.TryGetValue(Key(connection.Id, db.Name, schema.Name, table.Name), out var indexes) && indexes.Count > 0)
                                                                                     {
-                                                                                        <MudTreeViewItem Value="@($"col:{tableKey}:{col.Name}")"
-                                                                                                         Text="@($"{col.Name} ({col.DataType})")"
-                                                                                                         Icon="@Icons.Material.Filled.ViewColumn" />
+                                                                                        <MudTreeViewItem Value="@($"ixfold:{tableKey}")" Text="@($"Indexes ({indexes.Count})")" Icon="@Icons.Material.Filled.AccountTree" Expanded="true">
+                                                                                            <ChildContent>
+                                                                                                @foreach (var ix in indexes)
+                                                                                                {
+                                                                                                    var localIx = ix;
+                                                                                                    <MudTreeViewItem Value="@($"ix:{tableKey}:{ix.Name}")"
+                                                                                                                     Icon="@(ix.IsPrimaryKey ? Icons.Material.Filled.VpnKey : Icons.Material.Filled.Sort)">
+                                                                                                        <BodyContent>
+                                                                                                            <div class="psms-node-label"
+                                                                                                                 title="@($"{ix.Type} · {ix.Columns}")"
+                                                                                                                 @oncontextmenu="@(e => OpenIndexMenu(e, connection, db.Name, schema.Name, table.Name, localIx))"
+                                                                                                                 @oncontextmenu:preventDefault="true"
+                                                                                                                 @oncontextmenu:stopPropagation="true">
+                                                                                                                @ix.Name
+                                                                                                                <span class="psms-node-meta">@(ix.IsPrimaryKey ? "PK" : ix.IsUnique ? "UQ" : ix.Type)</span>
+                                                                                                            </div>
+                                                                                                        </BodyContent>
+                                                                                                    </MudTreeViewItem>
+                                                                                                }
+                                                                                            </ChildContent>
+                                                                                        </MudTreeViewItem>
+                                                                                    }
+
+                                                                                    @if (_fks.TryGetValue(Key(connection.Id, db.Name, schema.Name, table.Name), out var fks) && fks.Count > 0)
+                                                                                    {
+                                                                                        <MudTreeViewItem Value="@($"fkfold:{tableKey}")" Text="@($"Keys ({fks.Count})")" Icon="@Icons.Material.Filled.Key" Expanded="true">
+                                                                                            <ChildContent>
+                                                                                                @foreach (var fk in fks)
+                                                                                                {
+                                                                                                    var localFk = fk;
+                                                                                                    <MudTreeViewItem Value="@($"fk:{tableKey}:{fk.Name}")"
+                                                                                                                     Icon="@Icons.Material.Filled.Link">
+                                                                                                        <BodyContent>
+                                                                                                            <div class="psms-node-label"
+                                                                                                                 title="@($"{fk.Columns} → {fk.ReferencedSchema}.{fk.ReferencedTable} ({fk.ReferencedColumns})")"
+                                                                                                                 @oncontextmenu="@(e => OpenForeignKeyMenu(e, connection, db.Name, schema.Name, table.Name, localFk))"
+                                                                                                                 @oncontextmenu:preventDefault="true"
+                                                                                                                 @oncontextmenu:stopPropagation="true">
+                                                                                                                @fk.Name
+                                                                                                            </div>
+                                                                                                        </BodyContent>
+                                                                                                    </MudTreeViewItem>
+                                                                                                }
+                                                                                            </ChildContent>
+                                                                                        </MudTreeViewItem>
                                                                                     }
                                                                                 }
                                                                                 else
@@ -257,6 +310,7 @@
 
 @code {
     [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string? Sql, string? Title)> OnOpenQuery { get; set; }
+    [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string Schema, string Table)> OnEditTopN { get; set; }
     [Parameter] public EventCallback<ConnectionDefinition> OnEditConnection { get; set; }
     [Parameter] public EventCallback OnRequestNewConnection { get; set; }
 
@@ -268,6 +322,8 @@
     private readonly Dictionary<string, List<ProcedureInfo>> _procs = new();
     private readonly Dictionary<string, List<FunctionInfo>> _funcs = new();
     private readonly Dictionary<string, List<ColumnInfo>> _columns = new();
+    private readonly Dictionary<string, List<IndexInfo>> _indexes = new();
+    private readonly Dictionary<string, List<ForeignKeyInfo>> _fks = new();
     private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
     private readonly HashSet<string> _loadingNodes = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> _connecting = [];
@@ -460,11 +516,16 @@
         Menus.Open(e.ClientX, e.ClientY,
         [
             new ContextMenuItem { Text = "Select Top 1000", Action = () => SelectTop1000(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Edit Top 200", Action = () => EditTopNAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "Select COUNT(*)", Action = () => ScriptCountAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "Script INSERT", Action = () => ScriptInsertAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Script INSERT…SELECT", Action = () => ScriptInsertSelectAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{table}") },
+            new ContextMenuItem { IsDivider = true, Text = "-" },
             new ContextMenuItem { Text = "Schema overview", Action = () => OpenSchemaOverviewAsync(connection, database, schema, table) },
             new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptTableAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Script as ALTER", Action = () => ScriptAlterTableAsync(connection, database, schema, table) },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptDropAsync(connection, database, schema, table, "TABLE") },
             new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) }
         ]);
     }
@@ -477,7 +538,8 @@
             new ContextMenuItem { Text = "Select COUNT(*)", Action = () => ScriptCountAsync(connection, database, schema, view) },
             new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{view}") },
             new ContextMenuItem { Text = "Schema overview", Action = () => OpenSchemaOverviewAsync(connection, database, schema, view) },
-            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, view, "View") }
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, view, "View") },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptDropAsync(connection, database, schema, view, "VIEW") }
         ]);
     }
 
@@ -488,6 +550,7 @@
             new ContextMenuItem { Text = "Script EXEC", Action = () => ScriptExecAsync(connection, database, schema, proc) },
             new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync($"{schema}.{proc}") },
             new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, proc, "Procedure") },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptDropAsync(connection, database, schema, proc, "PROCEDURE") },
             new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) }
         ]);
     }
@@ -496,7 +559,28 @@
     {
         Menus.Open(e.ClientX, e.ClientY,
         [
-            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, func, "Function") }
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptObjectAsync(connection, database, schema, func, "Function") },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptDropAsync(connection, database, schema, func, "FUNCTION") }
+        ]);
+    }
+
+    private void OpenIndexMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string table, IndexInfo index)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync(index.Name) },
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptIndexCreateAsync(connection, database, schema, table, index) },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptIndexDropAsync(connection, database, schema, table, index) }
+        ]);
+    }
+
+    private void OpenForeignKeyMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string table, ForeignKeyInfo fk)
+    {
+        Menus.Open(e.ClientX, e.ClientY,
+        [
+            new ContextMenuItem { Text = "Copy name", Action = () => CopyNameAsync(fk.Name) },
+            new ContextMenuItem { Text = "Script as CREATE", Action = () => ScriptForeignKeyCreateAsync(connection, database, schema, table, fk) },
+            new ContextMenuItem { Text = "Script as DROP", Action = () => ScriptForeignKeyDropAsync(connection, database, schema, table, fk) }
         ]);
     }
 
@@ -551,7 +635,7 @@
         if (expanded)
         {
             _expanded.Add(key);
-            await LoadColumnsAsync(connection, database, schema, table);
+            await LoadTableDetailsAsync(connection, database, schema, table);
         }
         else
         {
@@ -688,7 +772,7 @@
         }
     }
 
-    private async Task LoadColumnsAsync(ConnectionDefinition connection, string database, string schema, string table)
+    private async Task LoadTableDetailsAsync(ConnectionDefinition connection, string database, string schema, string table)
     {
         var key = Key(connection.Id, database, schema, table);
         var nodeKey = $"t:{connection.Id}:{database}:{schema}:{table}";
@@ -704,7 +788,10 @@
         {
             var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
             var provider = ProviderFactory.GetProvider(connection.Engine);
-            _columns[key] = (await provider.GetColumnsAsync(connection, password, database, schema, table)).ToList();
+            var overview = await provider.GetTableSchemaOverviewAsync(connection, password, database, schema, table);
+            _columns[key] = overview.Columns.ToList();
+            _indexes[key] = overview.Indexes.ToList();
+            _fks[key] = overview.ForeignKeys.ToList();
         }
         catch (Exception ex)
         {
@@ -715,6 +802,11 @@
             _loadingNodes.Remove(nodeKey);
             StateHasChanged();
         }
+    }
+
+    private async Task LoadColumnsAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        await LoadTableDetailsAsync(connection, database, schema, table);
     }
 
     private Task NewQuery(ConnectionDefinition connection, string database, string? sql = null, string? title = null)
@@ -779,6 +871,9 @@
         return NewQuery(connection, database, sql, $"{schema}.{table}");
     }
 
+    private Task EditTopNAsync(ConnectionDefinition connection, string database, string schema, string table) =>
+        OnEditTopN.InvokeAsync((connection, database, schema, table));
+
     private Task ScriptCountAsync(ConnectionDefinition connection, string database, string schema, string table)
     {
         var qualified = Qualify(connection.Engine, schema, table);
@@ -816,6 +911,116 @@
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
+    }
+
+    private async Task ScriptInsertSelectAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var provider = ProviderFactory.GetProvider(connection.Engine);
+            var columns = await provider.GetColumnsAsync(connection, password, database, schema, table);
+            var colNames = columns.Select(c => QuoteIdent(connection.Engine, c.Name)).ToList();
+            if (colNames.Count == 0)
+            {
+                Snackbar.Add("No columns found for INSERT…SELECT script.", Severity.Warning);
+                return;
+            }
+
+            var qualified = Qualify(connection.Engine, schema, table);
+            var nl = System.Environment.NewLine;
+            var list = string.Join(", ", colNames);
+            var sql =
+                $"INSERT INTO {qualified} ({list}){nl}" +
+                $"SELECT {list}{nl}" +
+                $"FROM {qualified}{nl}" +
+                $"WHERE 1 = 0; -- template";
+            await NewQuery(connection, database, sql, $"INSERT SELECT {schema}.{table}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private Task ScriptAlterTableAsync(ConnectionDefinition connection, string database, string schema, string table)
+    {
+        var qualified = Qualify(connection.Engine, schema, table);
+        var nl = System.Environment.NewLine;
+        var sql = connection.Engine == DbEngine.SqlServer
+            ? $"ALTER TABLE {qualified}{nl}ADD /* column_name datatype NULL */;{nl}-- ALTER TABLE {qualified} DROP COLUMN /* column_name */;"
+            : $"ALTER TABLE {qualified}{nl}ADD COLUMN /* column_name TYPE */;{nl}-- ALTER TABLE {qualified} DROP COLUMN /* column_name */;";
+        return NewQuery(connection, database, sql, $"ALTER {schema}.{table}");
+    }
+
+    private Task ScriptDropAsync(ConnectionDefinition connection, string database, string schema, string name, string objectType)
+    {
+        var qualified = Qualify(connection.Engine, schema, name);
+        var sql = $"DROP {objectType} {qualified};";
+        return NewQuery(connection, database, sql, $"DROP {schema}.{name}");
+    }
+
+    private Task ScriptIndexCreateAsync(ConnectionDefinition connection, string database, string schema, string table, IndexInfo index)
+    {
+        var tableQ = Qualify(connection.Engine, schema, table);
+        var ixName = QuoteIdent(connection.Engine, index.Name);
+        var cols = string.Join(", ",
+            index.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(c => QuoteIdent(connection.Engine, c)));
+        string sql;
+        if (index.IsPrimaryKey)
+        {
+            sql = $"ALTER TABLE {tableQ} ADD CONSTRAINT {ixName} PRIMARY KEY ({cols});";
+        }
+        else if (connection.Engine == DbEngine.SqlServer)
+        {
+            var unique = index.IsUnique ? "UNIQUE " : "";
+            sql = $"CREATE {unique}INDEX {ixName} ON {tableQ} ({cols});";
+        }
+        else
+        {
+            var unique = index.IsUnique ? "UNIQUE " : "";
+            sql = $"CREATE {unique}INDEX {ixName} ON {tableQ} ({cols});";
+        }
+
+        return NewQuery(connection, database, sql, $"CREATE INDEX {index.Name}");
+    }
+
+    private Task ScriptIndexDropAsync(ConnectionDefinition connection, string database, string schema, string table, IndexInfo index)
+    {
+        var tableQ = Qualify(connection.Engine, schema, table);
+        var ixName = QuoteIdent(connection.Engine, index.Name);
+        var sql = connection.Engine == DbEngine.SqlServer
+            ? (index.IsPrimaryKey
+                ? $"ALTER TABLE {tableQ} DROP CONSTRAINT {ixName};"
+                : $"DROP INDEX {ixName} ON {tableQ};")
+            : $"DROP INDEX IF EXISTS {ixName};";
+        return NewQuery(connection, database, sql, $"DROP INDEX {index.Name}");
+    }
+
+    private Task ScriptForeignKeyCreateAsync(ConnectionDefinition connection, string database, string schema, string table, ForeignKeyInfo fk)
+    {
+        var tableQ = Qualify(connection.Engine, schema, table);
+        var fkName = QuoteIdent(connection.Engine, fk.Name);
+        var cols = string.Join(", ",
+            fk.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(c => QuoteIdent(connection.Engine, c)));
+        var refTable = Qualify(connection.Engine, fk.ReferencedSchema, fk.ReferencedTable);
+        var refCols = string.Join(", ",
+            fk.ReferencedColumns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(c => QuoteIdent(connection.Engine, c)));
+        var sql = $"ALTER TABLE {tableQ} ADD CONSTRAINT {fkName} FOREIGN KEY ({cols}) REFERENCES {refTable} ({refCols});";
+        return NewQuery(connection, database, sql, $"CREATE FK {fk.Name}");
+    }
+
+    private Task ScriptForeignKeyDropAsync(ConnectionDefinition connection, string database, string schema, string table, ForeignKeyInfo fk)
+    {
+        var tableQ = Qualify(connection.Engine, schema, table);
+        var fkName = QuoteIdent(connection.Engine, fk.Name);
+        var sql = connection.Engine == DbEngine.SqlServer
+            ? $"ALTER TABLE {tableQ} DROP CONSTRAINT {fkName};"
+            : $"ALTER TABLE {tableQ} DROP CONSTRAINT {fkName};";
+        return NewQuery(connection, database, sql, $"DROP FK {fk.Name}");
     }
 
     private Task ScriptExecAsync(ConnectionDefinition connection, string database, string schema, string proc)

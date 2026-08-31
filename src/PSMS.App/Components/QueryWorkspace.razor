@@ -256,15 +256,22 @@
 
     public async Task ExecuteActiveAsync()
     {
-        await RunAsync(estimatedPlan: false);
+        await RunAsync(PlanKind.None);
     }
 
     public async Task ExecuteEstimatedPlanAsync()
     {
-        await RunAsync(estimatedPlan: true);
+        await RunAsync(PlanKind.Estimated);
     }
 
-    private async Task RunAsync(bool estimatedPlan)
+    public async Task ExecuteActualPlanAsync()
+    {
+        await RunAsync(PlanKind.Actual);
+    }
+
+    private enum PlanKind { None, Estimated, Actual }
+
+    private async Task RunAsync(PlanKind plan)
     {
         var tab = Sessions.ActiveTab;
         if (tab is null)
@@ -297,11 +304,14 @@
 
         try
         {
-            tab.LastResult = estimatedPlan
-                ? await QueryRunner.ExecuteEstimatedPlanAsync(connection, tab.Database, sql)
-                : await QueryRunner.ExecuteAsync(connection, tab.Database, sql);
+            tab.LastResult = plan switch
+            {
+                PlanKind.Estimated => await QueryRunner.ExecuteEstimatedPlanAsync(connection, tab.Database, sql),
+                PlanKind.Actual => await QueryRunner.ExecuteActualPlanAsync(connection, tab.Database, sql),
+                _ => await QueryRunner.ExecuteAsync(connection, tab.Database, sql)
+            };
 
-            if (!estimatedPlan)
+            if (plan == PlanKind.None)
             {
                 await History.AddAsync(new QueryHistoryEntry
                 {
@@ -328,16 +338,19 @@
             {
                 var rows = tab.LastResult.ResultSets.Sum(r => r.Rows.Count);
                 Snackbar.Add(
-                    estimatedPlan
-                        ? $"Estimated plan — {rows:N0} plan row(s)."
-                        : $"Query completed — {rows:N0} row(s).",
+                    plan switch
+                    {
+                        PlanKind.Estimated => $"Estimated plan — {rows:N0} plan row(s).",
+                        PlanKind.Actual => $"Actual plan — {rows:N0} row(s) (query executed).",
+                        _ => $"Query completed — {rows:N0} row(s)."
+                    },
                     Severity.Success);
             }
         }
         catch (Exception ex)
         {
             tab.LastResult = new QueryResult { Error = ex.Message, Messages = [ex.Message] };
-            if (!estimatedPlan)
+            if (plan == PlanKind.None)
             {
                 await History.AddAsync(new QueryHistoryEntry
                 {

@@ -113,9 +113,16 @@
         {
             foreach (var col in pair.Value)
             {
-                _items.Add(new SuggestItem("Column", $"{pair.Key}.{col.Name}", Quote(col.Name)));
+                var display = col.Name + " · " + pair.Key;
+                _items.Add(new SuggestItem("Column", display, Quote(col.Name)));
             }
         }
+
+        _items.Sort((a, b) =>
+        {
+            var kindOrder = StringComparer.OrdinalIgnoreCase.Compare(a.Kind, b.Kind);
+            return kindOrder != 0 ? kindOrder : StringComparer.OrdinalIgnoreCase.Compare(a.Display, b.Display);
+        });
     }
 
     private async Task InsertAsync(SuggestItem item)

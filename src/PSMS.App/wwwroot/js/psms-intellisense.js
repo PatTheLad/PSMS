@@ -242,7 +242,8 @@ window.psmsIntelliSense = (function () {
     });
   }
 
-  function suggestColumns(bucket, schema, table, filter, range) {
+  function suggestColumns(bucket, schema, table, filter, range, tier) {
+    tier = tier || "3";
     state.columns.forEach(function (c) {
       if (schema && String(c.schema).toLowerCase() !== String(schema).toLowerCase()) return;
       if (String(c.table).toLowerCase() !== String(table).toLowerCase()) return;
@@ -254,16 +255,63 @@ window.psmsIntelliSense = (function () {
         insertText: quote(c.name),
         range: range,
         filterText: c.name,
-        sortText: rankKey(c.name, filter, "3")
+        sortText: rankKey(c.name, filter, tier)
       });
     });
   }
 
-  function mergeBudgets(kw, dbs, objs, cols) {
+  /** All columns matching filter (used when typing e.g. "Ar" → ArtNr). */
+  function suggestAllColumns(bucket, filter, range, tier) {
+    tier = tier || "3";
+    state.columns.forEach(function (c) {
+      if (!matches(c.name, filter)) return;
+      bucket.push({
+        label: c.name,
+        kind: kindToMonaco("Column"),
+        detail: "Column · " + c.dataType + " · " + c.schema + "." + c.table,
+        insertText: quote(c.name),
+        range: range,
+        filterText: c.name + " " + c.schema + " " + c.table,
+        sortText: rankKey(c.name, filter, tier)
+      });
+    });
+  }
+
+  /** Typing a table/database name after FROM / JOIN / INTO. */
+  function isTableNameContext(prefix) {
+    return /\b(FROM|INTO|UPDATE)\s+[A-Za-z0-9_\[\]"`.]*$/i.test(prefix)
+      || /\b(FROM|INTO|UPDATE)\s*$/i.test(prefix)
+      || /\bJOIN\s+[A-Za-z0-9_\[\]"`.]*$/i.test(prefix)
+      || /\bJOIN\s*$/i.test(prefix)
+      || /\b(INNER|LEFT|RIGHT|FULL|OUTER|CROSS)\s+JOIN\s+[A-Za-z0-9_\[\]"`.]*$/i.test(prefix)
+      || /\b(INNER|LEFT|RIGHT|FULL|OUTER|CROSS)\s+JOIN\s*$/i.test(prefix);
+  }
+
+  /** SELECT list, JOIN ON, WHERE, ORDER BY, etc. — prefer columns over tables. */
+  function isColumnContext(prefix) {
+    if (isTableNameContext(prefix)) return false;
+    const u = prefix.toUpperCase();
+    if (/\bSELECT\b/.test(u)) {
+      var fromPos = u.lastIndexOf(" FROM ");
+      if (fromPos < 0) return true;
+    }
+    if (/\b(ON|WHERE|AND|OR|SET|HAVING|BY)\b/.test(u)) return true;
+    if (/,\s*[A-Za-z0-9_\[\]"`.]*$/i.test(prefix)) return true;
+    return false;
+  }
+
+  function mergeBudgets(kw, dbs, objs, cols, columnContext) {
+    if (columnContext) {
+      return kw.slice(0, 8)
+        .concat(cols.slice(0, 220))
+        .concat(objs.slice(0, 120))
+        .concat(dbs.slice(0, 50))
+        .slice(0, 400);
+    }
     return kw.slice(0, 12)
-      .concat(objs.slice(0, 250))
-      .concat(dbs.slice(0, 100))
-      .concat(cols.slice(0, 100))
+      .concat(objs.slice(0, 200))
+      .concat(cols.slice(0, 180))
+      .concat(dbs.slice(0, 80))
       .slice(0, 400);
   }
 
@@ -284,6 +332,8 @@ window.psmsIntelliSense = (function () {
     const objs = [];
     const cols = [];
     const dotted = parseDotted(prefix);
+    const columnCtx = isColumnContext(prefix);
+    const colTier = columnCtx ? "2" : "3";
 
     if (dotted.afterDot) {
       if (dotted.parts.length === 1) {
@@ -298,7 +348,7 @@ window.psmsIntelliSense = (function () {
         if (asSchema || !asDb) {
           suggestObjectsInSchema(objs, q, filter, range, state.currentDatabase);
         }
-        suggestColumns(cols, null, q, filter, range);
+        suggestColumns(cols, null, q, filter, range, colTier);
       } else if (dotted.parts.length === 2) {
         const a = dotted.parts[0];
         const b = dotted.parts[1];
@@ -307,12 +357,12 @@ window.psmsIntelliSense = (function () {
         } else if (isKnownDatabase(a)) {
           suggestObjectsInSchema(objs, b, filter, range, a);
         } else {
-          suggestColumns(cols, a, b, filter, range);
+          suggestColumns(cols, a, b, filter, range, colTier);
         }
       } else if (dotted.parts.length >= 3) {
         const schema = dotted.parts[dotted.parts.length - 2];
         const table = dotted.parts[dotted.parts.length - 1];
-        suggestColumns(cols, schema === "" ? "dbo" : schema, table, filter, range);
+        suggestColumns(cols, schema === "" ? "dbo" : schema, table, filter, range, colTier);
       }
     } else if (filter.length >= 1) {
       keywords.forEach(function (k) {
@@ -327,6 +377,10 @@ window.psmsIntelliSense = (function () {
           sortText: rankKey(k, filter, "0")
         });
       });
+
+      if (!isTableNameContext(prefix)) {
+        suggestAllColumns(cols, filter, range, colTier);
+      }
 
       state.databases.forEach(function (db) {
         if (!matches(db, filter)) return;
@@ -360,7 +414,7 @@ window.psmsIntelliSense = (function () {
       });
     }
 
-    return { suggestions: mergeBudgets(kw, dbs, objs, cols) };
+    return { suggestions: mergeBudgets(kw, dbs, objs, cols, columnCtx) };
   }
 
   function findIdentifierRanges(model) {

@@ -74,6 +74,7 @@
     [Parameter] public EventCallback OnRequestSnippets { get; set; }
     [Parameter] public EventCallback OnRequestDuplicate { get; set; }
     [Parameter] public EventCallback OnRequestEstimatedPlan { get; set; }
+    [Parameter] public EventCallback OnRequestActualPlan { get; set; }
     [Parameter] public EventCallback OnRequestCloseTab { get; set; }
     [Parameter] public EventCallback<(ConnectionDefinition Connection, string Database, string? Sql, string? Title)> OnOpenQuery { get; set; }
 
@@ -159,6 +160,7 @@
             Cmd("Duplicate tab", null, () => OnRequestDuplicate.InvokeAsync()),
             Cmd("Close tab", "Ctrl+W", () => OnRequestCloseTab.InvokeAsync()),
             Cmd("Estimated plan", "Ctrl+L", () => OnRequestEstimatedPlan.InvokeAsync()),
+            Cmd("Actual plan", "Ctrl+Shift+L", () => OnRequestActualPlan.InvokeAsync()),
             Cmd(Sessions.ShowAdminWorkspace ? "Show queries" : "Open Admin", null, () => OnRequestAdmin.InvokeAsync()),
         };
 

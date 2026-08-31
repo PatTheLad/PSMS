@@ -26,7 +26,7 @@
         <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
                    Disabled="_busy || _connection is null || _connection.Engine != DbEngine.SqlServer" OnClick="RefreshAsync">Refresh</MudButton>
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Code"
-                   OnClick="BackToQueries">Queries</MudButton>
+                   OnClick="BackToQueries">Back to queries</MudButton>
     </div>
 
     @if (_connection is null)

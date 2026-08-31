@@ -56,15 +56,19 @@ Outputs:
 
 - Modern slate/teal dark shell with resizable Object Explorer and editor/results splitter
 - Save / edit / delete named connections for **SQL Server**, **SQLite**, and **Access** (Windows) — encrypted passwords under `~/.config/psms` or `%AppData%\PSMS`
-- Object Explorer: databases → schemas → tables / views / procedures / functions → columns
-- Context menus: New Query, Select Top 1000, Script as CREATE, Connect / Disconnect / Refresh,
-  Create Database, Backup, Restore, Open Admin
+- Object Explorer: databases → schemas → tables / views / procedures / functions → columns, indexes, keys
+- Context menus: New Query, Select Top 1000, Script as CREATE / ALTER / DROP / INSERT…SELECT,
+  Connect / Disconnect / Refresh, Create Database, Backup, Restore, Open Admin
+- Connection dialog: paste ADO.NET connection string; Browse… for SQLite/Access files
 - Query tabs with Monaco SQL editor, database dropdown, Open / Save `.sql`
 - **IntelliSense** (SSMS-style): tables, views, schemas, columns, procs/functions + keywords; databases + cross-DB tables on SQL Server
 - Execute (**F5** / Ctrl+Enter) with selection support; Cancel; `GO` batch splitting
+- **Estimated plan** (Ctrl+L) and **Actual plan** (Ctrl+Shift+L) for SQL Server, with Plan tree view
+- **Edit Top 200** from Object Explorer — edit cells, Script UPDATEs (PK-aware)
+- Session restore: open query tabs persist across restarts
 - Multiple result-set tabs, Messages pane, CSV export, 10k row soft cap
 - Status bar: connection, database, IntelliSense counts, row count, elapsed, Ready/Executing
-- **SQL Server Admin** (toolbar **Admin**):
+- **SQL Server Admin** (toolbar **Admin** — keeps query editors mounted when toggling):
   - Analysis + **Activity Monitor** (blocking, kill session, expensive queries)
   - Databases: create, backup/restore with verify, **properties** (online/offline, read-only, shrink, files)
   - **SQL Agent**: create/edit/delete/script jobs, steps, schedules, start/stop/history

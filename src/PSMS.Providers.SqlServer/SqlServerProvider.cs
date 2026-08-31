@@ -528,16 +528,38 @@ public sealed class SqlServerProvider : IDbProvider
         }
     }
 
-    public async Task<QueryResult> ExecuteEstimatedPlanAsync(
+    public Task<QueryResult> ExecuteEstimatedPlanAsync(
         ConnectionDefinition connection,
         string? password,
         string database,
         string sql,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ExecutePlanAsync(connection, password, database, sql, actual: false, cancellationToken);
+
+    public Task<QueryResult> ExecuteActualPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default) =>
+        ExecutePlanAsync(connection, password, database, sql, actual: true, cancellationToken);
+
+    private async Task<QueryResult> ExecutePlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        bool actual,
+        CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
-        var messages = new List<string> { "Estimated execution plan (SET SHOWPLAN_ALL) — query was not executed." };
+        var modeLabel = actual
+            ? "Actual execution plan (SET STATISTICS PROFILE) — query was executed."
+            : "Estimated execution plan (SET SHOWPLAN_ALL) — query was not executed.";
+        var messages = new List<string> { modeLabel };
         var resultSets = new List<ResultSet>();
+        var onSql = actual ? "SET STATISTICS PROFILE ON" : "SET SHOWPLAN_ALL ON";
+        var offSql = actual ? "SET STATISTICS PROFILE OFF" : "SET SHOWPLAN_ALL OFF";
 
         try
         {
@@ -545,7 +567,7 @@ public sealed class SqlServerProvider : IDbProvider
             sqlConnection.InfoMessage += (_, e) => messages.Add(e.Message);
             await sqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            await using (var on = new SqlCommand("SET SHOWPLAN_ALL ON", sqlConnection))
+            await using (var on = new SqlCommand(onSql, sqlConnection))
             {
                 await on.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -573,7 +595,8 @@ public sealed class SqlServerProvider : IDbProvider
 
                         var rows = new List<IReadOnlyList<object?>>();
                         var displayRows = new List<IReadOnlyList<string?>>();
-                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        var maxRows = actual ? 10_000 : int.MaxValue;
+                        while (rows.Count < maxRows && await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                         {
                             var row = new object?[reader.FieldCount];
                             for (var i = 0; i < reader.FieldCount; i++)
@@ -585,11 +608,18 @@ public sealed class SqlServerProvider : IDbProvider
                             displayRows.Add(ResultMaterializer.FormatRow(row));
                         }
 
+                        var truncated = false;
+                        if (rows.Count >= maxRows && await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            truncated = true;
+                        }
+
                         resultSets.Add(new ResultSet
                         {
                             Columns = columns,
                             Rows = rows,
-                            DisplayRows = displayRows
+                            DisplayRows = displayRows,
+                            Truncated = truncated
                         });
                     }
                     while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
@@ -599,7 +629,7 @@ public sealed class SqlServerProvider : IDbProvider
             {
                 try
                 {
-                    await using var off = new SqlCommand("SET SHOWPLAN_ALL OFF", sqlConnection);
+                    await using var off = new SqlCommand(offSql, sqlConnection);
                     await off.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
                 }
                 catch
@@ -609,12 +639,13 @@ public sealed class SqlServerProvider : IDbProvider
             }
 
             sw.Stop();
-            messages.Insert(0, $"Plan ready in {sw.ElapsedMilliseconds} ms. {resultSets.Count} plan result set(s).");
+            messages.Insert(0, $"Plan ready in {sw.ElapsedMilliseconds} ms. {resultSets.Count} result set(s).");
             return new QueryResult
             {
                 ResultSets = resultSets,
                 Messages = messages,
-                ElapsedMilliseconds = sw.ElapsedMilliseconds
+                ElapsedMilliseconds = sw.ElapsedMilliseconds,
+                IsExecutionPlan = true
             };
         }
         catch (OperationCanceledException)
@@ -625,7 +656,8 @@ public sealed class SqlServerProvider : IDbProvider
                 ResultSets = resultSets,
                 Messages = messages.Concat(["Cancelled."]).ToList(),
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
-                Error = "Cancelled"
+                Error = "Cancelled",
+                IsExecutionPlan = true
             };
         }
         catch (Exception ex)
@@ -636,7 +668,8 @@ public sealed class SqlServerProvider : IDbProvider
                 ResultSets = resultSets,
                 Messages = messages.Concat([ex.Message]).ToList(),
                 ElapsedMilliseconds = sw.ElapsedMilliseconds,
-                Error = ex.Message
+                Error = ex.Message,
+                IsExecutionPlan = true
             };
         }
     }

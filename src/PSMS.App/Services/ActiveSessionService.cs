@@ -54,7 +54,7 @@ public sealed class ActiveSessionService
     public double ExplorerWidth { get; set; } = 280;
     public double EditorRatio { get; set; } = 0.55;
 
-    /// <summary>When true, the main pane shows SQL Server Admin instead of the query workspace.</summary>
+    /// <summary>When true, Admin overlays the main pane; query editors stay mounted underneath.</summary>
     public bool ShowAdminWorkspace { get; private set; }
 
     public void ShowAdmin()
@@ -197,6 +197,17 @@ public sealed class ActiveSessionService
             ActiveTabId = _tabs.LastOrDefault()?.Id;
         }
 
+        Notify();
+    }
+
+    public void RestoreTabs(IEnumerable<QueryTab> tabs, Guid? activeTabId)
+    {
+        _tabs.Clear();
+        _tabs.AddRange(tabs);
+        ActiveTabId = activeTabId is Guid id && _tabs.Any(t => t.Id == id)
+            ? id
+            : _tabs.LastOrDefault()?.Id;
+        ViewingPinnedId = null;
         Notify();
     }
 

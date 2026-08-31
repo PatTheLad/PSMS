@@ -340,6 +340,18 @@ public sealed class SqliteProvider : IDbProvider
             Messages = ["Estimated execution plan is only available for SQL Server."]
         });
 
+    public Task<QueryResult> ExecuteActualPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new QueryResult
+        {
+            Error = "Actual execution plan is only available for SQL Server.",
+            Messages = ["Actual execution plan is only available for SQL Server."]
+        });
+
     private static async Task<IReadOnlyList<ColumnInfo>> ReadTableInfoAsync(SqliteConnection db, string table, CancellationToken cancellationToken)
     {
         // PRAGMA table_info does not accept parameters for the table name.

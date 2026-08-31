@@ -38,8 +38,26 @@
             <MudButton Size="Size.Small" Variant="@(_textMode ? Variant.Filled : Variant.Text)"
                        StartIcon="@Icons.Material.Filled.Notes"
                        Disabled="@(!result.HasResultSet)" OnClick="ToggleTextMode">Text</MudButton>
+            @if (CanShowPlanTree(result))
+            {
+                <MudButton Size="Size.Small" Variant="@(_planTreeMode ? Variant.Filled : Variant.Text)"
+                           StartIcon="@Icons.Material.Filled.AccountTree"
+                           OnClick="TogglePlanTree">Plan tree</MudButton>
+            }
+            @if (result.EditContext is not null)
+            {
+                <span class="psms-trunc-badge">Edit</span>
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.DataObject"
+                           Disabled="@(_edits.Count == 0)" OnClick="ScriptUpdatesAsync">
+                    Script UPDATEs (@_edits.Count)
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearEdits" Disabled="@(_edits.Count == 0)">
+                    Discard edits
+                </MudButton>
+            }
             <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DataObject"
-                       Disabled="@(!result.HasResultSet)" OnClick="CopyInsertAsync">INSERT</MudButton>
+                       Disabled="@(!result.HasResultSet || result.EditContext is not null)" OnClick="CopyInsertAsync">INSERT</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PushPin"
                        Disabled="@(!result.HasResultSet || viewingPin is not null)" OnClick="PinAsync">Pin</MudButton>
             <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.BarChart"
@@ -82,7 +100,8 @@
 
         <div class="psms-results-main @(_selectedRow is not null ? "has-detail" : null)">
             <div class="psms-results-center">
-                <MudTabs Elevation="0" Class="psms-results-tabs" Style="flex:1;min-height:0;height:100%"
+                <MudTabs @key="_tabsKey"
+                         Elevation="0" Class="psms-results-tabs" Style="flex:1;min-height:0;height:100%"
                          ActivePanelIndex="_activePanel"
                          ActivePanelIndexChanged="OnPanelChanged">
                     @{
@@ -92,11 +111,52 @@
                     {
                         var localIndex = setIndex++;
                         <MudTabPanel Text="@TabLabel(localIndex, set)">
-                            @if (_activePanel == localIndex)
+                            @* Always render active panel content; clamp keeps _activePanel in range *@
+                            @if (IsPanelActive(localIndex, result))
                             {
                                 var rows = GetGridRows(set);
                                 <div class="psms-results-grid-host" @key="_gridKey">
-                                    @if (rows.Count == 0)
+                                    @if (_planTreeMode && PlanTreeBuilder.LooksLikePlan(set))
+                                    {
+                                        var tree = PlanTreeBuilder.Build(set);
+                                        <div class="psms-plan-tree">
+                                            <div class="psms-results-text-tools">
+                                                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => CopyPlanTreeAsync(tree))">Copy tree</MudButton>
+                                            </div>
+                                            @if (tree.Count == 0)
+                                            {
+                                                <div class="psms-empty" style="padding:0.75rem 1rem">No plan operators to display.</div>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var node in tree)
+                                                {
+                                                    <div class="psms-plan-node" style="@($"padding-left:{node.Depth * 1.1}rem")">
+                                                        @if (!string.IsNullOrWhiteSpace(node.PhysicalOp))
+                                                        {
+                                                            <span class="psms-plan-op">@node.PhysicalOp</span>
+                                                        }
+                                                        <span class="psms-plan-text">@node.Text</span>
+                                                        <span class="psms-plan-meta">
+                                                            @if (!string.IsNullOrWhiteSpace(node.ActualRows))
+                                                            {
+                                                                <text>rows=@node.ActualRows</text>
+                                                            }
+                                                            else if (!string.IsNullOrWhiteSpace(node.EstimateRows))
+                                                            {
+                                                                <text>est=@node.EstimateRows</text>
+                                                            }
+                                                            @if (!string.IsNullOrWhiteSpace(node.Cost))
+                                                            {
+                                                                <text> · cost=@node.Cost</text>
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                }
+                                            }
+                                        </div>
+                                    }
+                                    else if (rows.Count == 0)
                                     {
                                         <div class="psms-empty" style="padding:0.75rem 1rem">No rows@(string.IsNullOrWhiteSpace(_filter) ? "." : " match this filter.")</div>
                                     }
@@ -146,16 +206,30 @@
                                                         @for (var c = 0; c < set.Columns.Count; c++)
                                                         {
                                                             var col = c;
-                                                            var cell = c < row.Cells.Count ? row.Cells[c] : null;
+                                                            var cell = DisplayCell(row, col);
                                                             var w = ColWidth(c);
                                                             var selected = IsCellSelected(row.Index, col);
-                                                            <div class="psms-grid-cell @(cell is null ? "is-null" : null) @(selected ? "cell-selected" : null)"
+                                                            var edited = _edits.ContainsKey((row.Index, col));
+                                                            var editing = _editCell == (row.Index, col);
+                                                            <div class="psms-grid-cell @(cell is null ? "is-null" : null) @(selected ? "cell-selected" : null) @(edited ? "cell-edited" : null)"
                                                                  data-col="@col"
                                                                  style="@CellStyle(w)"
                                                                  title="@(cell ?? "NULL")"
                                                                  @onclick="@(e => OnCellClick(e, row, col))"
-                                                                 @ondblclick="@(() => OpenCellViewerAsync(set, row, col))">
-                                                                @(cell is null ? "NULL" : cell)
+                                                                 @ondblclick="@(() => OnCellDoubleClick(set, row, col))">
+                                                                @if (editing)
+                                                                {
+                                                                    <input class="psms-cell-input"
+                                                                           value="@(_editBuffer ?? "")"
+                                                                           @oninput="OnEditInput"
+                                                                           @onkeydown="OnEditKeyDown"
+                                                                           @onblur="CommitEdit"
+                                                                           @onclick:stopPropagation="true" />
+                                                                }
+                                                                else
+                                                                {
+                                                                    @(cell is null ? "NULL" : cell)
+                                                                }
                                                             </div>
                                                         }
                                                     </div>
@@ -227,11 +301,16 @@
     private string _filter = string.Empty;
     private MudTextField<string>? _filterField;
     private bool _textMode;
+    private bool _planTreeMode;
     private Guid? _boundTabId;
     private QueryResult? _boundResult;
     private Guid? _boundPinnedId;
     private int _activePanel;
+    private string _tabsKey = "tabs";
     private string _gridKey = "empty";
+    private int _resultEpoch;
+    private int _renderedEpoch = -1;
+    private bool _kickVirtualize;
     private int[] _colWidths = [];
     private int _tableWidth = 800;
     private bool _userResizedCols;
@@ -249,6 +328,11 @@
     private readonly HashSet<(int Row, int Col)> _selection = [];
     private (int Row, int Col)? _anchor;
     private AggState _agg = AggState.Empty;
+
+    private readonly Dictionary<(int Row, int Col), string?> _edits = new();
+    private (int Row, int Col)? _editCell;
+    private string? _editBuffer;
+    private string? _editOriginal;
 
     private sealed class GridRow
     {
@@ -273,6 +357,18 @@
         RebuildLayout();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Virtualize can measure 0-height on the first paint after results arrive; remount once layout has size.
+        if (_kickVirtualize && _resultEpoch != _renderedEpoch)
+        {
+            _kickVirtualize = false;
+            _renderedEpoch = _resultEpoch;
+            _gridKey = $"{_tabsKey}-kick-{_resultEpoch}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private void OnChanged()
     {
         var tab = Sessions.ActiveTab;
@@ -281,6 +377,8 @@
             && ReferenceEquals(result, _boundResult)
             && Sessions.ViewingPinnedId == _boundPinnedId)
         {
+            // Still refresh while executing so status chrome stays in sync
+            InvokeAsync(StateHasChanged);
             return;
         }
 
@@ -292,21 +390,49 @@
         _sortAsc = true;
         _userResizedCols = false;
         _activePanel = 0;
+        _resultEpoch++;
+        _tabsKey = $"tabs-{_boundTabId}-{_boundPinnedId}-{_resultEpoch}";
+        _edits.Clear();
+        _editCell = null;
+        _planTreeMode = result?.IsExecutionPlan == true
+                        || (result?.ResultSets.Any(PlanTreeBuilder.LooksLikePlan) == true);
         ClearSelection();
         InvalidateCache();
         RebuildLayout();
+        _kickVirtualize = result is { HasResultSet: true };
         InvokeAsync(StateHasChanged);
     }
 
     private void OnPanelChanged(int index)
     {
-        _activePanel = index;
+        var result = DisplayResult;
+        // Result tabs + Messages tab
+        var maxIndex = result is null ? 0 : result.ResultSets.Count; // Messages is last
+        var clamped = Math.Clamp(index, 0, Math.Max(0, maxIndex));
+        if (clamped == _activePanel && _cachedRows is not null)
+        {
+            return;
+        }
+
+        _activePanel = clamped;
         _sortCol = null;
         _sortAsc = true;
         _userResizedCols = false;
         ClearSelection();
         InvalidateCache();
         RebuildLayout();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private bool IsPanelActive(int localIndex, QueryResult result)
+    {
+        // Messages tab index == ResultSets.Count — don't render any result grid then
+        if (_activePanel < 0 || _activePanel >= result.ResultSets.Count)
+        {
+            return false;
+        }
+
+        return _activePanel == localIndex;
     }
 
     private void OnFilterChanged()
@@ -369,7 +495,7 @@
         }
 
         _tableWidth = 52 + _colWidths.Sum();
-        _gridKey = $"{_boundTabId}-{_boundPinnedId}-{_activePanel}-{display.ElapsedMilliseconds}-{rows.Count}-{_filter}-{_sortCol}-{_sortAsc}-{_tableWidth}";
+        _gridKey = $"{_tabsKey}-p{_activePanel}-{display.ElapsedMilliseconds}-{rows.Count}-{_filter}-{_sortCol}-{_sortAsc}-{_tableWidth}";
     }
 
     private async Task StartColResizeAsync(MouseEventArgs e, int col)
@@ -684,7 +810,142 @@
         }
     }
 
-    private void ToggleTextMode() => _textMode = !_textMode;
+    private void ToggleTextMode()
+    {
+        _textMode = !_textMode;
+        if (_textMode)
+        {
+            _planTreeMode = false;
+        }
+    }
+
+    private void TogglePlanTree()
+    {
+        _planTreeMode = !_planTreeMode;
+        if (_planTreeMode)
+        {
+            _textMode = false;
+        }
+    }
+
+    private static bool CanShowPlanTree(QueryResult result) =>
+        result.IsExecutionPlan || result.ResultSets.Any(PlanTreeBuilder.LooksLikePlan);
+
+    private string? DisplayCell(GridRow row, int col)
+    {
+        if (_edits.TryGetValue((row.Index, col), out var edited))
+        {
+            return edited;
+        }
+
+        return col < row.Cells.Count ? row.Cells[col] : null;
+    }
+
+    private void OnCellDoubleClick(ResultSet set, GridRow row, int col)
+    {
+        var result = DisplayResult;
+        if (result?.EditContext is not null && Sessions.ViewingPinned is null)
+        {
+            BeginEdit(row, col);
+            return;
+        }
+
+        _ = OpenCellViewerAsync(set, row, col);
+    }
+
+    private void BeginEdit(GridRow row, int col)
+    {
+        _editCell = (row.Index, col);
+        _editOriginal = DisplayCell(row, col);
+        _editBuffer = _editOriginal ?? "";
+    }
+
+    private void OnEditInput(ChangeEventArgs e) => _editBuffer = e.Value?.ToString();
+
+    private void OnEditKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            CommitEdit();
+        }
+        else if (e.Key == "Escape")
+        {
+            _editCell = null;
+            _editBuffer = null;
+        }
+    }
+
+    private void CommitEdit()
+    {
+        if (_editCell is not { } cell)
+        {
+            return;
+        }
+
+        var value = string.IsNullOrWhiteSpace(_editBuffer) ? null : _editBuffer;
+        if (string.Equals(value, _editOriginal, StringComparison.Ordinal))
+        {
+            _edits.Remove(cell);
+        }
+        else
+        {
+            _edits[cell] = value;
+        }
+
+        _editCell = null;
+        _editBuffer = null;
+        _editOriginal = null;
+    }
+
+    private void ClearEdits()
+    {
+        _edits.Clear();
+        _editCell = null;
+    }
+
+    private Task ScriptUpdatesAsync()
+    {
+        var result = DisplayResult;
+        if (result?.EditContext is null || result.ResultSets.Count == 0 || _edits.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var setIndex = Math.Clamp(_activePanel, 0, result.ResultSets.Count - 1);
+        var set = result.ResultSets[setIndex];
+        if (PlanTreeBuilder.LooksLikePlan(set) && result.ResultSets.Count > 1)
+        {
+            set = result.ResultSets.FirstOrDefault(s => !PlanTreeBuilder.LooksLikePlan(s)) ?? set;
+        }
+
+        var sql = UpdateScriptBuilder.Build(set, result.EditContext, _edits);
+        var ctx = result.EditContext;
+        var conn = Sessions.OpenConnections.FirstOrDefault(c => c.Id == ctx.ConnectionId)
+                   ?? Sessions.SelectedConnection;
+        if (conn is null)
+        {
+            Snackbar.Add("Connection not available to open UPDATE script.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        Sessions.ShowQueries();
+        Sessions.OpenQueryTab(conn, ctx.Database, sql, $"UPDATE {ctx.Schema}.{ctx.Table}");
+        Snackbar.Add("UPDATE script opened — review before executing.", Severity.Success);
+        return Task.CompletedTask;
+    }
+
+    private async Task CopyPlanTreeAsync(IReadOnlyList<PlanTreeNode> tree)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", PlanTreeBuilder.FormatText(tree));
+            Snackbar.Add("Plan tree copied.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Could not copy plan tree.", Severity.Warning);
+        }
+    }
 
     private static string BuildTextView(ResultSet set, List<GridRow> rows)
     {

@@ -9,6 +9,17 @@ public sealed class ResultSet
     public bool Truncated { get; init; }
 }
 
+/// <summary>When set, ResultsPane allows cell edits and can script UPDATEs.</summary>
+public sealed class EditableResultContext
+{
+    public required Guid ConnectionId { get; init; }
+    public required string Database { get; init; }
+    public required string Schema { get; init; }
+    public required string Table { get; init; }
+    public required DbEngine Engine { get; init; }
+    public IReadOnlyList<string> KeyColumns { get; init; } = [];
+}
+
 public sealed class QueryResult
 {
     public IReadOnlyList<ResultSet> ResultSets { get; init; } = [];
@@ -16,6 +27,9 @@ public sealed class QueryResult
     public long ElapsedMilliseconds { get; init; }
     public int RowsAffected { get; init; }
     public string? Error { get; init; }
+    /// <summary>Estimated or actual execution plan grid (SHOWPLAN / STATISTICS PROFILE).</summary>
+    public bool IsExecutionPlan { get; init; }
+    public EditableResultContext? EditContext { get; set; }
 
     public bool HasResultSet => ResultSets.Count > 0;
 

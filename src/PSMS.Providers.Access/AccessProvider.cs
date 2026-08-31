@@ -305,6 +305,18 @@ public sealed class AccessProvider : IDbProvider
             Messages = ["Estimated execution plan is only available for SQL Server."]
         });
 
+    public Task<QueryResult> ExecuteActualPlanAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string database,
+        string sql,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new QueryResult
+        {
+            Error = "Actual execution plan is only available for SQL Server.",
+            Messages = ["Actual execution plan is only available for SQL Server."]
+        });
+
     private static async Task<IReadOnlyList<string>> GetSchemaTablesAsync(
         OdbcConnection db,
         string[] tableTypes,

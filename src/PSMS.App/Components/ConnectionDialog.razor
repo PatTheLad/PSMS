@@ -1,7 +1,9 @@
 @using System.Runtime.InteropServices
+@using System.Text.RegularExpressions
 @inject IConnectionStore Store
 @inject IDbProviderFactory ProviderFactory
 @inject ActiveSessionService Sessions
+@inject IFileDialogService FileDialogs
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -34,6 +36,17 @@
 
             @if (_model.Engine == DbEngine.SqlServer)
             {
+                <MudExpansionPanels Elevation="0" Class="psms-conn-expand">
+                    <MudExpansionPanel Text="Paste connection string" Dense="true" @bind-Expanded="_showConnString">
+                        <MudTextField @bind-Value="_connectionString"
+                                      Label="ADO.NET connection string"
+                                      Lines="3"
+                                      HelperText="Server / Data Source, Initial Catalog, User Id, Password, Encrypt, TrustServerCertificate, Integrated Security" />
+                        <MudButton Class="mt-2" Size="Size.Small" Variant="Variant.Outlined"
+                                   OnClick="ApplyConnectionString" Disabled="_busy">Apply</MudButton>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+
                 <MudTextField @bind-Value="_model.Server" Label="Server" Required="true" HelperText="e.g. localhost or .\SQLEXPRESS" />
                 <MudNumericField T="int?" @bind-Value="_model.Port" Label="Port (optional)" Min="1" Max="65535" />
                 <MudTextField @bind-Value="_model.Database" Label="Default database" HelperText="Optional; defaults to master" />
@@ -49,8 +62,14 @@
             }
             else
             {
-                <MudTextField @bind-Value="_model.Database" Label="Database file path" Required="true"
-                              HelperText="@(_model.Engine == DbEngine.Sqlite ? "Path to .db / .sqlite file" : "Path to .accdb / .mdb file")" />
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudTextField @bind-Value="_model.Database" Label="Database file path" Required="true" Class="flex-grow-1"
+                                  HelperText="@(_model.Engine == DbEngine.Sqlite ? "Path to .db / .sqlite file" : "Path to .accdb / .mdb file")" />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.FolderOpen"
+                               OnClick="BrowseDatabaseFileAsync"
+                               Disabled="_busy">Browse…</MudButton>
+                </MudStack>
                 <MudTextField @bind-Value="_model.Server" Label="Display / alternate path (optional)" />
                 @if (_model.Engine == DbEngine.Access)
                 {
@@ -79,6 +98,8 @@
 
     private ConnectionDefinition _model = new();
     private string? _password;
+    private string _connectionString = string.Empty;
+    private bool _showConnString;
     private bool _busy;
 
     private string AuthLabel => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -114,6 +135,139 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private async Task BrowseDatabaseFileAsync()
+    {
+        var path = await FileDialogs.OpenDatabaseFileAsync(_model.Engine == DbEngine.Access);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        _model.Database = path;
+        if (string.IsNullOrWhiteSpace(_model.Name) || _model.Name is "SQL Server" or "SQLite" or "Access")
+        {
+            _model.Name = Path.GetFileNameWithoutExtension(path);
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.Server))
+        {
+            _model.Server = path;
+        }
+    }
+
+    private void ApplyConnectionString()
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            Snackbar.Add("Paste a connection string first.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            var map = ParseConnectionString(_connectionString);
+            if (map.TryGetValue("data source", out var ds) || map.TryGetValue("server", out ds) || map.TryGetValue("addr", out ds) || map.TryGetValue("address", out ds))
+            {
+                var (server, port) = SplitServerPort(ds);
+                _model.Server = server;
+                if (port is not null)
+                {
+                    _model.Port = port;
+                }
+            }
+
+            if (map.TryGetValue("initial catalog", out var db) || map.TryGetValue("database", out db))
+            {
+                _model.Database = db;
+            }
+
+            var integrated = map.TryGetValue("integrated security", out var integ)
+                             && IsTruthy(integ);
+            var trusted = map.TryGetValue("trusted_connection", out var tc) && IsTruthy(tc);
+            _model.UseWindowsAuth = (integrated || trusted) && RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+            if (map.TryGetValue("user id", out var user) || map.TryGetValue("uid", out user) || map.TryGetValue("user", out user))
+            {
+                _model.UserName = user;
+                if (!string.IsNullOrWhiteSpace(user))
+                {
+                    _model.UseWindowsAuth = false;
+                }
+            }
+
+            if (map.TryGetValue("password", out var pwd) || map.TryGetValue("pwd", out pwd))
+            {
+                _password = pwd;
+                _model.UseWindowsAuth = false;
+            }
+
+            if (map.TryGetValue("encrypt", out var enc))
+            {
+                _model.Encrypt = IsTruthy(enc);
+            }
+
+            if (map.TryGetValue("trustservercertificate", out var tsc) || map.TryGetValue("trust server certificate", out tsc))
+            {
+                _model.TrustServerCertificate = IsTruthy(tsc);
+            }
+
+            if (string.IsNullOrWhiteSpace(_model.Name) || _model.Name == "SQL Server")
+            {
+                _model.Name = string.IsNullOrWhiteSpace(_model.Database)
+                    ? _model.Server
+                    : $"{_model.Server} / {_model.Database}";
+            }
+
+            Snackbar.Add("Connection string applied to fields.", Severity.Success);
+            _showConnString = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not parse connection string: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Dictionary<string, string> ParseConnectionString(string raw)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in Regex.Matches(raw, @"(?:^|;)\s*([^=;]+)\s*=\s*(""[^""]*""|[^;]*)", RegexOptions.CultureInvariant))
+        {
+            var key = m.Groups[1].Value.Trim();
+            var value = m.Groups[2].Value.Trim();
+            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+            {
+                value = value[1..^1];
+            }
+
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                map[key] = value;
+            }
+        }
+
+        return map;
+    }
+
+    private static (string Server, int? Port) SplitServerPort(string dataSource)
+    {
+        var value = dataSource.Trim();
+        // tcp:host,1433 or host,1433
+        value = Regex.Replace(value, @"^tcp:", "", RegexOptions.IgnoreCase);
+        var comma = value.LastIndexOf(',');
+        if (comma > 0 && int.TryParse(value[(comma + 1)..].Trim(), out var port) && port is > 0 and <= 65535)
+        {
+            return (value[..comma].Trim(), port);
+        }
+
+        return (value, null);
+    }
+
+    private static bool IsTruthy(string value) =>
+        value.Equals("true", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("sspi", StringComparison.OrdinalIgnoreCase)
+        || value == "1";
 
     private async Task TestAsync()
     {
