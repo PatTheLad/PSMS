@@ -15,12 +15,37 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       sha: ${{ steps.ver.outputs.sha }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Compute version
         id: ver
         shell: bash
         run: |
+          set -euo pipefail
           sha="${GITHUB_SHA:0:7}"
-          ver="1.0.${GITHUB_RUN_NUMBER}"
+
+          # Monotonic patch: never go backwards vs prior release or commit count.
+          # (Renaming the workflow resets GITHUB_RUN_NUMBER — that previously published
+          # 1.0.1/1.0.2 after users already had 1.0.6–1.0.8 from "Windows Setup".)
+          commits="$(git rev-list --count HEAD)"
+          prev_patch=0
+          if prev_json="$(curl -fsSL "https://github.com/PatTheLad/PSMS/releases/download/latest/version.json" 2>/dev/null)"; then
+            prev="$(printf '%s' "$prev_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null || true)"
+            if [[ "$prev" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
+              prev_patch="${BASH_REMATCH[1]}"
+            fi
+          fi
+
+          # Historical floor from the old Windows Setup workflow (run_number peaked at 8).
+          hist_floor=8
+          next="$commits"
+          if (( prev_patch + 1 > next )); then next=$((prev_patch + 1)); fi
+          if (( hist_floor + 1 > next )); then next=$((hist_floor + 1)); fi
+
+          ver="1.0.${next}"
+          echo "version=$ver (commits=$commits prev_patch=$prev_patch)"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
