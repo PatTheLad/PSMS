@@ -29,49 +29,43 @@
         <MudAppBar Elevation="0" Dense="true" Fixed="false" Class="psms-toolbar" Gutters="true">
             <MudText Typo="Typo.subtitle1" Class="psms-brand">PSMS</MudText>
 
-            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
-                <ActivatorContent>
-                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">File</MudButton>
-                </ActivatorContent>
-                <ChildContent>
-                    <MudMenuItem Icon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query <span class="psms-menu-hint">Ctrl+N</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open… <span class="psms-menu-hint">Ctrl+O</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save <span class="psms-menu-hint">Ctrl+S</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As…</MudMenuItem>
-                    <MudDivider Class="my-1" />
-                    <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicateTab">Duplicate tab</MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudMenuItem>
-                </ChildContent>
+            <MudMenu Label="File" Variant="Variant.Text" Size="Size.Small" Dense="true"
+                     EndIcon="@Icons.Material.Filled.ArrowDropDown"
+                     Class="psms-toolbar-menu"
+                     AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <MudMenuItem Icon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query <span class="psms-menu-hint">Ctrl+N</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open… <span class="psms-menu-hint">Ctrl+O</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save <span class="psms-menu-hint">Ctrl+S</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As…</MudMenuItem>
+                <MudDivider Class="my-1" />
+                <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicateTab">Duplicate tab</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudMenuItem>
             </MudMenu>
 
-            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
-                <ActivatorContent>
-                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">Query</MudButton>
-                </ActivatorContent>
-                <ChildContent>
-                    <MudMenuItem Icon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute <span class="psms-menu-hint">F5</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.Stop" Disabled="@(!CanCancel)" OnClick="Cancel">Cancel <span class="psms-menu-hint">Esc</span></MudMenuItem>
-                    <MudDivider Class="my-1" />
-                    <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" OnClick="FormatSqlAsync">Format SQL <span class="psms-menu-hint">Ctrl+Shift+F</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Estimated plan <span class="psms-menu-hint">Ctrl+L</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="ActualPlanAsync">Actual plan <span class="psms-menu-hint">Ctrl+Shift+L</span></MudMenuItem>
-                    <MudDivider Class="my-1" />
-                    <MudMenuItem Icon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object <span class="psms-menu-hint">Ctrl+Space</span></MudMenuItem>
-                </ChildContent>
+            <MudMenu Label="Query" Variant="Variant.Text" Size="Size.Small" Dense="true"
+                     EndIcon="@Icons.Material.Filled.ArrowDropDown"
+                     Class="psms-toolbar-menu"
+                     AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <MudMenuItem Icon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute <span class="psms-menu-hint">F5</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Stop" Disabled="@(!CanCancel)" OnClick="Cancel">Cancel <span class="psms-menu-hint">Esc</span></MudMenuItem>
+                <MudDivider Class="my-1" />
+                <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" OnClick="FormatSqlAsync">Format SQL <span class="psms-menu-hint">Ctrl+Shift+F</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Estimated plan <span class="psms-menu-hint">Ctrl+L</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="ActualPlanAsync">Actual plan <span class="psms-menu-hint">Ctrl+Shift+L</span></MudMenuItem>
+                <MudDivider Class="my-1" />
+                <MudMenuItem Icon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object <span class="psms-menu-hint">Ctrl+Space</span></MudMenuItem>
             </MudMenu>
 
-            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
-                <ActivatorContent>
-                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">Tools</MudButton>
-                </ActivatorContent>
-                <ChildContent>
-                    <MudMenuItem Icon="@Icons.Material.Filled.Terminal" OnClick="OpenPaletteAsync">Command palette <span class="psms-menu-hint">Ctrl+Shift+P</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="OpenHistoryAsync">Query history <span class="psms-menu-hint">Ctrl+H</span></MudMenuItem>
-                    <MudMenuItem Icon="@Icons.Material.Filled.Bookmark" OnClick="OpenSnippetsAsync">Snippets</MudMenuItem>
-                    <MudDivider Class="my-1" />
-                    <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" OnClick="RefreshIntelliSenseAsync">Refresh IntelliSense</MudMenuItem>
-                </ChildContent>
+            <MudMenu Label="Tools" Variant="Variant.Text" Size="Size.Small" Dense="true"
+                     EndIcon="@Icons.Material.Filled.ArrowDropDown"
+                     Class="psms-toolbar-menu"
+                     AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <MudMenuItem Icon="@Icons.Material.Filled.Terminal" OnClick="OpenPaletteAsync">Command palette <span class="psms-menu-hint">Ctrl+Shift+P</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="OpenHistoryAsync">Query history <span class="psms-menu-hint">Ctrl+H</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Bookmark" OnClick="OpenSnippetsAsync">Snippets</MudMenuItem>
+                <MudDivider Class="my-1" />
+                <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" OnClick="RefreshIntelliSenseAsync">Refresh IntelliSense</MudMenuItem>
             </MudMenu>
 
             <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
@@ -103,19 +97,27 @@
             <MudSpacer />
             @if (Updates.Available is { } update)
             {
-                <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Success"
-                           StartIcon="@Icons.Material.Filled.SystemUpdateAlt"
-                           Disabled="@Updates.IsInstalling"
-                           OnClick="InstallUpdateAsync"
-                           Class="mr-2"
-                           title="@($"Update to {update.Version}")">
-                    @(Updates.IsInstalling
-                        ? $"Updating… {Updates.InstallProgress:0}%"
-                        : $"Update {update.Version}")
-                </MudButton>
+                <MudTooltip Text="@(Updates.IsInstalling
+                                   ? $"Updating to {update.Version}…"
+                                   : $"Update to {update.Version} (quiet install)")">
+                    <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Success"
+                               StartIcon="@Icons.Material.Filled.SystemUpdateAlt"
+                               Disabled="@Updates.IsInstalling"
+                               OnClick="InstallUpdateAsync"
+                               Class="psms-update-btn mr-1">
+                        @if (Updates.IsInstalling)
+                        {
+                            <span class="psms-spinner psms-spinner-sm" style="margin-right:0.35rem;border-top-color:#fff" aria-hidden="true"></span>
+                            <span class="psms-update-label">@($"{Updates.InstallProgress:0}%")</span>
+                        }
+                        else
+                        {
+                            <span class="psms-update-label">Update</span>
+                        }
+                    </MudButton>
+                </MudTooltip>
             }
-            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
-            <MudText Typo="Typo.caption" Class="ml-2 d-none d-lg-inline" Style="opacity:.7">F5 · Ctrl+S · Esc</MudText>
+            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="psms-engine-chip">@EngineLabel</MudChip>
         </MudAppBar>
 
         <div class="psms-body">
@@ -294,7 +296,7 @@
     {
         try
         {
-            Snackbar.Add("Downloading update… the app will close when the installer starts.", Severity.Info);
+            Snackbar.Add("Downloading update… PSMS will restart when finished.", Severity.Info);
             await Updates.DownloadAndInstallAsync();
             if (!string.IsNullOrWhiteSpace(Updates.LastError))
             {

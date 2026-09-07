@@ -95,4 +95,4 @@ To add another engine later, implement `IDbProvider` in a new project and regist
 - Access connections require Microsoft Access Database Engine (ACE) ODBC on Windows.
 - PhotinoX.Blazor is used so the app can target .NET 10 on all three desktop OSes.
 - Classic SQL Trace Profiler is not used; Profiler is Extended Events for Windows + Linux SQL Server.
-- **Windows auto-update:** installed builds check the GitHub [`latest`](https://github.com/PatTheLad/PSMS/releases/tag/latest) release on startup. When a newer version is available, an **Update** button appears in the toolbar; one click downloads `PSMS-Setup-win-x64.exe`, launches it, and closes the app so the installer can replace files.
+- **Windows auto-update:** installed builds check the GitHub [`latest`](https://github.com/PatTheLad/PSMS/releases/tag/latest) release on startup. When a newer version is available, an **Update** button appears; one click downloads the MSI, applies it quietly (`msiexec /qn`), and relaunches PSMS. The interactive Setup EXE is only for first-time installs.

@@ -121,6 +121,31 @@ html, body {
     min-width: 0;
 }
 
+.psms-update-btn {
+    flex: 0 0 auto;
+    min-width: 0 !important;
+}
+
+.psms-update-label {
+    white-space: nowrap;
+}
+
+.psms-engine-chip {
+    flex: 0 0 auto;
+    max-width: 9rem;
+    overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+    .psms-update-label {
+        display: none;
+    }
+
+    .psms-update-btn .mud-button-label {
+        margin: 0;
+    }
+}
+
 .psms-menu-hint {
     margin-left: auto;
     padding-left: 1.25rem;

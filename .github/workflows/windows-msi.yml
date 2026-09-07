@@ -43,7 +43,8 @@ jobs:
           Copy-Item $exe.FullName artifacts/PSMS-Setup-win-x64.exe -Force
           if ($msi) { Copy-Item $msi.FullName artifacts/PSMS-Setup-win-x64.msi -Force }
           $setupUrl = "https://github.com/PatTheLad/PSMS/releases/download/latest/PSMS-Setup-win-x64.exe"
-          @{ version = $ver; setupUrl = $setupUrl } | ConvertTo-Json -Compress |
+          $msiUrl = "https://github.com/PatTheLad/PSMS/releases/download/latest/PSMS-Setup-win-x64.msi"
+          @{ version = $ver; setupUrl = $setupUrl; msiUrl = $msiUrl } | ConvertTo-Json -Compress |
             Set-Content -Path artifacts/version.json -Encoding utf8NoBOM
 
       - name: Upload build artifacts
