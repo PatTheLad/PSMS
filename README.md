@@ -33,7 +33,7 @@ dotnet run --project src/PSMS.App
 
 ### Windows Setup installer
 
-Every push to **`main`** builds a Setup EXE on GitHub Actions and publishes it to the [`latest` release](https://github.com/PatTheLad/PSMS/releases/tag/latest).
+Every push to **`main`** builds Windows + macOS installers on GitHub Actions and publishes them to the [`latest` release](https://github.com/PatTheLad/PSMS/releases/tag/latest).
 
 **Recommended download:** `PSMS-Setup-*-win-x64.exe` — detects ASP.NET Core 10 (x64) and installs it if missing, then installs PSMS.
 
@@ -51,6 +51,22 @@ Outputs:
 - Installs under `Program Files\PSMS`
 - Adds Start Menu + Desktop shortcuts
 - Target PCs need the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)
+
+### macOS installer (Apple Silicon)
+
+**Recommended download:** `PSMS-osx-arm64.dmg` — open the disk image and drag **PSMS** into Applications.
+
+Local build on a **Mac** with the .NET 10 SDK:
+
+```bash
+chmod +x ./build-macos.sh ./install-macos.sh
+./build-macos.sh Release 1.0.0          # → artifacts/PSMS-osx-arm64.{dmg,app.zip}
+./install-macos.sh 1.0.0                # install into ~/Applications
+```
+
+- Self-contained `.app` (no separate .NET runtime install)
+- In-app **Update** replaces the `.app` quietly from `PSMS-osx-arm64.app.zip`
+- Prefer `~/Applications` so updates do not need admin rights
 
 ## Features
 
@@ -95,4 +111,4 @@ To add another engine later, implement `IDbProvider` in a new project and regist
 - Access connections require Microsoft Access Database Engine (ACE) ODBC on Windows.
 - PhotinoX.Blazor is used so the app can target .NET 10 on all three desktop OSes.
 - Classic SQL Trace Profiler is not used; Profiler is Extended Events for Windows + Linux SQL Server.
-- **Windows auto-update:** installed builds check the GitHub [`latest`](https://github.com/PatTheLad/PSMS/releases/tag/latest) release on startup. When a newer version is available, an **Update** button appears; one click downloads the MSI, applies it quietly (`msiexec /qn`), and relaunches PSMS. The interactive Setup EXE is only for first-time installs.
+- **Auto-update (Windows + macOS):** installed builds check the GitHub [`latest`](https://github.com/PatTheLad/PSMS/releases/tag/latest) release on startup. When a newer version is available, an **Update** button appears. Windows applies the MSI quietly; macOS replaces `PSMS.app` from the zip and relaunches. The Setup EXE / DMG are for first-time installs only.

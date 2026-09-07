@@ -1,0 +1,152 @@
+name: Desktop Release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      sha: ${{ steps.ver.outputs.sha }}
+    steps:
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          sha="${GITHUB_SHA:0:7}"
+          ver="1.0.${GITHUB_RUN_NUMBER}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Setup EXE (with .NET 10 bootstrap)
+        shell: pwsh
+        run: |
+          .\build-msi.ps1 -Configuration Release -Version "${{ needs.version.outputs.version }}"
+
+      - name: Stage stable Windows filenames
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.exe | Select-Object -First 1
+          $msi = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.msi | Select-Object -First 1
+          if (-not $exe) { throw 'Setup EXE not found' }
+          Copy-Item $exe.FullName artifacts/PSMS-Setup-win-x64.exe -Force
+          if ($msi) { Copy-Item $msi.FullName artifacts/PSMS-Setup-win-x64.msi -Force }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: |
+            artifacts/PSMS-Setup-win-x64.exe
+            artifacts/PSMS-Setup-win-x64.msi
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build macOS app + DMG
+        shell: bash
+        run: |
+          chmod +x ./build-macos.sh
+          ./build-macos.sh Release "${{ needs.version.outputs.version }}" osx-arm64
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: |
+            artifacts/PSMS-osx-arm64.app.zip
+            artifacts/PSMS-osx-arm64.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-setup
+          path: release
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+          path: release
+
+      - name: Write version.json
+        shell: bash
+        run: |
+          ver="${{ needs.version.outputs.version }}"
+          base="https://github.com/PatTheLad/PSMS/releases/download/latest"
+          printf '%s\n' \
+            '{' \
+            "  \"version\": \"${ver}\"," \
+            "  \"setupUrl\": \"${base}/PSMS-Setup-win-x64.exe\"," \
+            "  \"msiUrl\": \"${base}/PSMS-Setup-win-x64.msi\"," \
+            "  \"macOsArm64Url\": \"${base}/PSMS-osx-arm64.app.zip\"," \
+            "  \"macOsDmgUrl\": \"${base}/PSMS-osx-arm64.dmg\"" \
+            '}' > release/version.json
+          ls -la release
+          cat release/version.json
+
+      - name: Publish to GitHub Release (latest)
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest (main)
+          allowUpdates: true
+          removeArtifacts: true
+          replacesArtifacts: true
+          makeLatest: true
+          generateReleaseNotes: true
+          body: |
+            Continuous desktop builds from `main`.
+
+            **Commit:** `${{ github.sha }}` (`${{ needs.version.outputs.sha }}`)
+            **Version:** `${{ needs.version.outputs.version }}`
+
+            ### Windows
+            Download **`PSMS-Setup-win-x64.exe`** (recommended first install):
+            1. Detects ASP.NET Core 10 (x64)
+            2. Installs it automatically if missing
+            3. Installs PSMS
+
+            The standalone `.msi` requires ASP.NET Core 10 already installed.
+            In-app **Update** uses the MSI quietly.
+
+            Target PCs also need [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (usually present with Edge).
+
+            ### macOS (Apple Silicon)
+            Download **`PSMS-osx-arm64.dmg`**, open it, and drag **PSMS** into Applications.
+            In-app **Update** replaces the `.app` quietly from `PSMS-osx-arm64.app.zip`.
+
+            On first open of an unsigned build: right-click → Open (or clear quarantine).
+          artifacts: release/PSMS-Setup-win-x64.exe,release/PSMS-Setup-win-x64.msi,release/PSMS-osx-arm64.app.zip,release/PSMS-osx-arm64.dmg,release/version.json
+          token: ${{ secrets.GITHUB_TOKEN }}
