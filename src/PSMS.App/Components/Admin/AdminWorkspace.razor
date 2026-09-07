@@ -23,8 +23,18 @@
             }
         </MudText>
         <MudSpacer />
-        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
-                   Disabled="_busy || _connection is null || _connection.Engine != DbEngine.SqlServer" OnClick="RefreshAsync">Refresh</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@(_busy ? null : Icons.Material.Filled.Refresh)"
+                   Disabled="_busy || _connection is null || _connection.Engine != DbEngine.SqlServer" OnClick="RefreshAsync">
+            @if (_busy)
+            {
+                <span class="psms-spinner psms-spinner-sm" style="margin-right:0.4rem" aria-hidden="true"></span>
+                <text>Loading...</text>
+            }
+            else
+            {
+                <text>Refresh</text>
+            }
+        </MudButton>
         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Code"
                    OnClick="BackToQueries">Back to queries</MudButton>
     </div>

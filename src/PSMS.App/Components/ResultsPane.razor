@@ -14,7 +14,14 @@
         var result = DisplayResult;
         var viewingPin = Sessions.ViewingPinned;
     }
-    @if (result is null)
+    @if (Sessions.ActiveTab?.IsExecuting == true && result is null)
+    {
+        <div class="psms-executing-overlay">
+            <span class="psms-spinner" aria-hidden="true"></span>
+            <span class="psms-loading-pulse">Executing query…</span>
+        </div>
+    }
+    else if (result is null)
     {
         <div class="psms-empty psms-empty-results">
             <div class="psms-empty-title">Results</div>

@@ -50,7 +50,11 @@
                 <MudTabPanel>
                     <TabContent>
                         <div class="psms-query-tab">
-                            @if (!string.IsNullOrWhiteSpace(color))
+                            @if (tab.IsExecuting)
+                            {
+                                <span class="psms-spinner psms-spinner-sm" aria-hidden="true"></span>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(color))
                             {
                                 <span class="psms-tab-color" style="@($"background:{color}")"></span>
                             }

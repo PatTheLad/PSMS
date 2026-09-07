@@ -98,14 +98,14 @@ html, body {
     border-bottom: 1px solid var(--psms-border);
     min-height: 40px;
     max-height: 44px;
-    overflow: hidden;
+    overflow: visible;
     flex-wrap: nowrap !important;
     z-index: 3;
 }
 
 .psms-toolbar .mud-toolbar-appbar {
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: visible;
     flex-wrap: nowrap !important;
     gap: 2px;
 }
@@ -115,6 +115,28 @@ html, body {
     font-weight: 500;
     white-space: nowrap;
     letter-spacing: 0;
+}
+
+.psms-toolbar-menu .mud-button-root {
+    min-width: 0;
+}
+
+.psms-menu-hint {
+    margin-left: auto;
+    padding-left: 1.25rem;
+    opacity: 0.55;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.mud-menu-item {
+    gap: 0.35rem;
+}
+
+.mud-list-item.mud-menu-item .mud-list-item-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
 }
 
 .psms-brand {
@@ -1007,6 +1029,104 @@ html.psms-col-resizing .psms-col-resizer {
 .psms-status-version {
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
+}
+
+/* —— Loading spinners —— */
+.psms-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(232, 238, 246, 0.18);
+    border-top-color: var(--psms-accent, #3b9eff);
+    border-radius: 50%;
+    animation: psms-spin 0.7s linear infinite;
+    flex: 0 0 auto;
+    vertical-align: middle;
+    box-sizing: border-box;
+}
+
+.psms-spinner-sm {
+    width: 12px;
+    height: 12px;
+    border-width: 1.5px;
+}
+
+.psms-spinner-lg {
+    width: 36px;
+    height: 36px;
+    border-width: 3px;
+}
+
+.psms-spinner-warn {
+    border-top-color: #fbbf24;
+}
+
+.psms-loading-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--psms-muted, #8b9bb0);
+    font-size: 0.8rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.psms-status .psms-loading-inline {
+    font-size: inherit;
+}
+
+.psms-node-loading {
+    padding: 0.1rem 0;
+}
+
+.psms-executing-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    height: 100%;
+    min-height: 120px;
+    color: var(--psms-muted);
+    font-size: 0.9rem;
+}
+
+.psms-query-tab .psms-spinner {
+    margin-right: 0.25rem;
+}
+
+.psms-boot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    height: 100%;
+    width: 100%;
+    background: #0b0f14;
+    color: #8b9bb0;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
+
+.psms-boot-brand {
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: #3b9eff;
+    font-size: 1.1rem;
+}
+
+@keyframes psms-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes psms-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+}
+
+.psms-loading-pulse {
+    animation: psms-pulse 1.2s ease-in-out infinite;
 }
 
 .psms-filter {

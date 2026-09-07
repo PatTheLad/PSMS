@@ -80,7 +80,11 @@
                     <ChildContent>
                         @if (_connecting.Contains(connection.Id))
                         {
-                            <MudTreeViewItem Value="@($"wait:{connection.Id}")" Text="Connecting…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                            <MudTreeViewItem Value="@($"wait:{connection.Id}")">
+                                <BodyContent>
+                                    <LoadingInline Text="Connecting…" Class="psms-node-loading" />
+                                </BodyContent>
+                            </MudTreeViewItem>
                         }
                         else if (_databases.TryGetValue(connection.Id, out var databases))
                         {
@@ -102,7 +106,11 @@
                                     <ChildContent>
                                         @if (_loadingNodes.Contains(dbKey))
                                         {
-                                            <MudTreeViewItem Value="@($"wait:{dbKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                            <MudTreeViewItem Value="@($"wait:{dbKey}")">
+                                                <BodyContent>
+                                                    <LoadingInline Class="psms-node-loading" />
+                                                </BodyContent>
+                                            </MudTreeViewItem>
                                         }
                                         else if (_schemas.TryGetValue(Key(connection.Id, db.Name), out var schemas))
                                         {
@@ -117,7 +125,11 @@
                                                     <ChildContent>
                                                         @if (_loadingNodes.Contains(schemaKey))
                                                         {
-                                                            <MudTreeViewItem Value="@($"wait:{schemaKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                                            <MudTreeViewItem Value="@($"wait:{schemaKey}")">
+                                                                <BodyContent>
+                                                                    <LoadingInline Class="psms-node-loading" />
+                                                                </BodyContent>
+                                                            </MudTreeViewItem>
                                                         }
                                                         else if (_tables.TryGetValue(Key(connection.Id, db.Name, schema.Name), out var tables))
                                                         {
@@ -142,7 +154,11 @@
                                                                             <ChildContent>
                                                                                 @if (_loadingNodes.Contains(tableKey))
                                                                                 {
-                                                                                    <MudTreeViewItem Value="@($"wait:{tableKey}")" Text="Loading…" Icon="@Icons.Material.Filled.HourglassEmpty" />
+                                                                                    <MudTreeViewItem Value="@($"wait:{tableKey}")">
+                                                                                        <BodyContent>
+                                                                                            <LoadingInline Class="psms-node-loading" />
+                                                                                        </BodyContent>
+                                                                                    </MudTreeViewItem>
                                                                                 }
                                                                                 else if (_columns.TryGetValue(Key(connection.Id, db.Name, schema.Name, table.Name), out var columns))
                                                                                 {

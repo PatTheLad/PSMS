@@ -79,9 +79,21 @@
         </MudStack>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="TestAsync" Disabled="_busy">Test</MudButton>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">Save</MudButton>
+        <MudButton OnClick="TestAsync" Disabled="_busy">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Test
+        </MudButton>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Save
+        </MudButton>
     </DialogActions>
 </MudDialog>
 

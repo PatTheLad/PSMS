@@ -29,29 +29,71 @@
         <MudAppBar Elevation="0" Dense="true" Fixed="false" Class="psms-toolbar" Gutters="true">
             <MudText Typo="Typo.subtitle1" Class="psms-brand">PSMS</MudText>
 
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudButton>
+            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">File</MudButton>
+                </ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Icon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query <span class="psms-menu-hint">Ctrl+N</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open… <span class="psms-menu-hint">Ctrl+O</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save <span class="psms-menu-hint">Ctrl+S</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As…</MudMenuItem>
+                    <MudDivider Class="my-1" />
+                    <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicateTab">Duplicate tab</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
+
+            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">Query</MudButton>
+                </ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Icon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute <span class="psms-menu-hint">F5</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.Stop" Disabled="@(!CanCancel)" OnClick="Cancel">Cancel <span class="psms-menu-hint">Esc</span></MudMenuItem>
+                    <MudDivider Class="my-1" />
+                    <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" OnClick="FormatSqlAsync">Format SQL <span class="psms-menu-hint">Ctrl+Shift+F</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Estimated plan <span class="psms-menu-hint">Ctrl+L</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.AccountTree" Disabled="@(!CanExecute)" OnClick="ActualPlanAsync">Actual plan <span class="psms-menu-hint">Ctrl+Shift+L</span></MudMenuItem>
+                    <MudDivider Class="my-1" />
+                    <MudMenuItem Icon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object <span class="psms-menu-hint">Ctrl+Space</span></MudMenuItem>
+                </ChildContent>
+            </MudMenu>
+
+            <MudMenu Dense="true" Class="psms-toolbar-menu" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowDropDown">Tools</MudButton>
+                </ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Icon="@Icons.Material.Filled.Terminal" OnClick="OpenPaletteAsync">Command palette <span class="psms-menu-hint">Ctrl+Shift+P</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="OpenHistoryAsync">Query history <span class="psms-menu-hint">Ctrl+H</span></MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.Bookmark" OnClick="OpenSnippetsAsync">Snippets</MudMenuItem>
+                    <MudDivider Class="my-1" />
+                    <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" OnClick="RefreshIntelliSenseAsync">Refresh IntelliSense</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
+
             <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
+
             <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query</MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open</MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As</MudButton>
             <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="FormatSqlAsync">Format</MudButton>
-            <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
-                       Disabled="@(!CanExecute)" OnClick="ExecuteAsync">Execute</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AccountTree"
-                       Disabled="@(!CanExecute)" OnClick="EstimatedPlanAsync">Est. plan</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.AccountTree"
-                       Disabled="@(!CanExecute)" OnClick="ActualPlanAsync" title="Actual plan (runs the query)">Act. plan</MudButton>
+            <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@(CanCancel ? null : Icons.Material.Filled.PlayArrow)"
+                       Disabled="@(!CanExecute)" OnClick="ExecuteAsync">
+                @if (CanCancel)
+                {
+                    <span class="psms-spinner psms-spinner-sm" style="margin-right:0.4rem;border-top-color:#fff" aria-hidden="true"></span>
+                    <text>Running...</text>
+                }
+                else
+                {
+                    <text>Execute</text>
+                }
+            </MudButton>
             <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                        Disabled="@(!CanCancel)" OnClick="Cancel">Cancel</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy"
-                       OnClick="DuplicateTab">Duplicate</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.LinkOff" OnClick="DisconnectAsync">Disconnect</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Terminal" OnClick="OpenPaletteAsync">Palette</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.History" OnClick="OpenHistoryAsync">History</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Bookmark" OnClick="OpenSnippetsAsync">Snippets</MudButton>
-            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="OpenSuggest">Insert object</MudButton>
             <MudDivider Vertical="true" FlexItem="true" Class="mx-1" />
             <MudButton Variant="@(Sessions.ShowAdminWorkspace ? Variant.Filled : Variant.Text)"
                        Size="Size.Small" Color="Color.Secondary"
@@ -73,11 +115,7 @@
                 </MudButton>
             }
             <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
-            <MudTooltip Text="Refresh object catalog used by Insert object">
-                <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
-                               OnClick="RefreshIntelliSenseAsync" aria-label="Refresh catalog" />
-            </MudTooltip>
-            <MudText Typo="Typo.caption" Class="ml-2 d-none d-md-inline" Style="opacity:.7">F5 · Ctrl+W · Esc cancel · Ctrl+L · Ctrl+Shift+P</MudText>
+            <MudText Typo="Typo.caption" Class="ml-2 d-none d-lg-inline" Style="opacity:.7">F5 · Ctrl+S · Esc</MudText>
         </MudAppBar>
 
         <div class="psms-body">

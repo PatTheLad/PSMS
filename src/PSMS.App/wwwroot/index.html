@@ -15,7 +15,13 @@
     <link href="css/app.css" rel="stylesheet" />
 </head>
 <body style="height:100%;margin:0;overflow:hidden;background:#0b0f14">
-    <app style="display:block;height:100%;overflow:hidden">Loading PSMS...</app>
+    <app style="display:block;height:100%;overflow:hidden">
+        <div class="psms-boot">
+            <div class="psms-spinner psms-spinner-lg" aria-hidden="true"></div>
+            <div class="psms-boot-brand">PSMS</div>
+            <div class="psms-loading-pulse">Loading…</div>
+        </div>
+    </app>
 
     <script src="_content/BlazorMonaco/jsInterop.js"></script>
     <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/loader.js"></script>

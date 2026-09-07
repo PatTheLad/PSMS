@@ -6,7 +6,7 @@
 <div class="psms-status" style="@StatusAccentStyle">
     @if (Sessions.ActiveTab?.IsExecuting == true)
     {
-        <span class="busy">Executing…</span>
+        <LoadingInline Text="Executing…" Class="busy" SpinnerClass="psms-spinner-sm psms-spinner-warn" />
     }
     else
     {
@@ -36,7 +36,7 @@
     {
         @if (snap.Status.StartsWith("Loading", StringComparison.OrdinalIgnoreCase))
         {
-            <span title="Loading IntelliSense catalog">IS: <strong>Loading…</strong></span>
+            <LoadingInline Text="IS catalog…" Title="Loading IntelliSense catalog" />
         }
         else if (!snap.Status.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
         {

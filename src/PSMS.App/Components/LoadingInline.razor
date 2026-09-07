@@ -1,0 +1,14 @@
+<span class="psms-loading-inline @Class" title="@Title">
+    <span class="psms-spinner @SpinnerClass" aria-hidden="true"></span>
+    @if (!string.IsNullOrWhiteSpace(Text))
+    {
+        <span>@Text</span>
+    }
+</span>
+
+@code {
+    [Parameter] public string Text { get; set; } = "Loading…";
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string SpinnerClass { get; set; } = "psms-spinner-sm";
+}
