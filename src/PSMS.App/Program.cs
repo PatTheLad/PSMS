@@ -60,7 +60,10 @@ internal static class Program
             .SetTitle("PSMS — SQL Management Studio")
             .SetUseOsDefaultSize(false)
             .SetSize(1440, 920)
-            .SetMinSize(960, 640);
+            .SetMinSize(960, 640)
+            // Required for Cmd/Ctrl+C/V (and Monaco clipboard) inside the WebView — especially on macOS WKWebView.
+            .SetGrantBrowserPermissions(true)
+            .SetJavascriptClipboardAccessEnabled(true);
 
         ApplyWindowIcon(window);
 

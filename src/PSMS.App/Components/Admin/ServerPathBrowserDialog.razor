@@ -1,0 +1,209 @@
+@inject ISqlServerAdminService Admin
+@inject IConnectionStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Browse SQL Server</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Paths are on the SQL Server host (@Connection.Server), not this PC — same as SSMS.
+            </MudText>
+
+            <div class="psms-server-path-bar">
+                <MudIconButton Icon="@Icons.Material.Filled.Home" Size="Size.Small" Disabled="_busy"
+                               OnClick="GoRootsAsync" title="Drives / roots" />
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="_busy || !CanGoUp"
+                               OnClick="GoUpAsync" title="Up" />
+                <MudTextField @bind-Value="_path"
+                              @bind-Value:after="ReloadAsync"
+                              Immediate="false"
+                              Margin="Margin.Dense"
+                              Variant="Variant.Outlined"
+                              Disabled="_busy"
+                              Class="psms-server-path-input"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@Icons.Material.Filled.Refresh"
+                              OnAdornmentClick="ReloadAsync" />
+            </div>
+
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" />
+            }
+
+            <MudPaper Class="psms-server-path-list" Elevation="0">
+                @if (!_busy && _entries.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-3">No folders or .bak files here.</MudText>
+                }
+                else
+                {
+                    @foreach (var entry in VisibleEntries)
+                    {
+                        var local = entry;
+                        <button type="button" class="psms-server-path-item @(IsSelected(local) ? "selected" : null)"
+                                @ondblclick="@(() => OpenOrSelectAsync(local))"
+                                @onclick="@(() => Select(local))">
+                            <MudIcon Icon="@(local.IsDirectory ? Icons.Material.Filled.Folder : Icons.Material.Filled.InsertDriveFile)"
+                                     Size="Size.Small" Class="mr-2" />
+                            <span class="name">@local.Name</span>
+                        </button>
+                    }
+                }
+            </MudPaper>
+
+            <MudTextField @bind-Value="_selectedPath" Label="Selected path" Immediate="true"
+                          HelperText="Double-click a folder to open it; select a .bak then OK" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_selectedPath)">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ConnectionDefinition Connection { get; set; } = new();
+    [Parameter] public string? InitialPath { get; set; }
+    [Parameter] public bool FilesOnlyBak { get; set; } = true;
+
+    private readonly List<ServerPathEntry> _entries = [];
+    private string _path = string.Empty;
+    private string _selectedPath = string.Empty;
+    private bool _busy;
+
+    private bool CanGoUp => !string.IsNullOrWhiteSpace(_path);
+
+    private IEnumerable<ServerPathEntry> VisibleEntries =>
+        FilesOnlyBak
+            ? _entries.Where(e => e.IsDirectory || e.Name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+            : _entries;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            if (!string.IsNullOrWhiteSpace(InitialPath))
+            {
+                _path = InitialPath;
+            }
+            else
+            {
+                _path = await Admin.GetDefaultBackupDirectoryAsync(Connection, password) ?? string.Empty;
+            }
+
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not open server browser: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private bool IsSelected(ServerPathEntry entry) =>
+        string.Equals(_selectedPath, entry.FullPath, StringComparison.OrdinalIgnoreCase);
+
+    private void Select(ServerPathEntry entry)
+    {
+        if (entry.IsDirectory)
+        {
+            _selectedPath = entry.FullPath;
+        }
+        else
+        {
+            _selectedPath = entry.FullPath;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task OpenOrSelectAsync(ServerPathEntry entry)
+    {
+        if (entry.IsDirectory)
+        {
+            _path = entry.FullPath;
+            _selectedPath = entry.FullPath;
+            await ReloadAsync();
+            return;
+        }
+
+        _selectedPath = entry.FullPath;
+        Ok();
+    }
+
+    private async Task GoRootsAsync()
+    {
+        _path = string.Empty;
+        _selectedPath = string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task GoUpAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_path))
+        {
+            return;
+        }
+
+        var p = _path.TrimEnd('\\', '/');
+        if (p.Length <= 3 && p.EndsWith(':'))
+        {
+            // C: → roots
+            _path = string.Empty;
+        }
+        else
+        {
+            var slash = p.Contains('/') && !p.Contains('\\') ? '/' : '\\';
+            var idx = p.LastIndexOf(slash);
+            _path = idx <= 0 ? string.Empty : (idx == 2 && p[1] == ':' ? p[..3] : p[..idx]);
+            if (_path.Length == 2 && _path[1] == ':')
+            {
+                _path += "\\";
+            }
+        }
+
+        _selectedPath = _path;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            var entries = await Admin.ListServerDirectoryAsync(Connection, password, string.IsNullOrWhiteSpace(_path) ? null : _path);
+            _entries.Clear();
+            _entries.AddRange(entries);
+        }
+        catch (Exception ex)
+        {
+            _entries.Clear();
+            Snackbar.Add($"Browse failed: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Ok()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedPath))
+        {
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(_selectedPath.Trim()));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

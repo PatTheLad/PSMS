@@ -1,5 +1,6 @@
 @inject ISqlServerAdminService Admin
 @inject IConnectionStore Store
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -10,7 +11,11 @@
                 Path is on the <em>SQL Server host</em> (container path when using Docker).
             </MudText>
             <MudTextField @bind-Value="_request.BackupPath" Label="Backup path (.bak)" Required="true"
-                          HelperText="Example (Linux): /var/opt/mssql/data/MyDb.bak" />
+                          HelperText="Example (Linux): /var/opt/mssql/data/MyDb.bak — path is on the SQL Server host" />
+            <MudStack Row="true" Spacing="1">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Dns"
+                           Disabled="_busy" OnClick="BrowseServerAsync">Browse server…</MudButton>
+            </MudStack>
             <MudCheckBox @bind-Value="_request.Compress" Label="Compression" Color="Color.Primary" />
             <MudCheckBox @bind-Value="_request.CopyOnly" Label="Copy-only (does not affect restore chain)" Color="Color.Primary" />
             <MudCheckBox @bind-Value="_request.Init" Label="INIT (overwrite media)" Color="Color.Primary" />
@@ -63,6 +68,60 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private async Task BrowseServerAsync()
+    {
+        string? initial = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_request.BackupPath))
+            {
+                var p = _request.BackupPath.TrimEnd('\\', '/');
+                var slash = p.Contains('/') && !p.Contains('\\') ? '/' : '\\';
+                var idx = p.LastIndexOf(slash);
+                if (idx > 0)
+                {
+                    initial = p[..idx];
+                    if (initial.Length == 2 && initial[1] == ':')
+                    {
+                        initial += "\\";
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var parameters = new DialogParameters<ServerPathBrowserDialog>
+        {
+            { x => x.Connection, Connection },
+            { x => x.InitialPath, initial },
+            { x => x.FilesOnlyBak, false }
+        };
+
+        var dialog = await DialogService.ShowAsync<ServerPathBrowserDialog>(
+            "Browse SQL Server",
+            parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string path } && !string.IsNullOrWhiteSpace(path))
+        {
+            // If they picked a folder, append suggested file name
+            if (!path.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+            {
+                var sep = path.Contains('/') && !path.Contains('\\') ? "/" : "\\";
+                var stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+                _request.BackupPath = path.TrimEnd('\\', '/') + sep + $"{Database}_{stamp}.bak";
+            }
+            else
+            {
+                _request.BackupPath = path;
+            }
+        }
+    }
 
     private async Task RunAsync()
     {

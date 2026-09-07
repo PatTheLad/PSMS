@@ -12,6 +12,7 @@
 @inject UiLayoutStore LayoutStore
 @inject SessionStore SessionStore
 @inject AppUpdateService Updates
+@inject PhotinoHost Photino
 @using PSMS.Core.Storage
 @using PSMS.Core.Sql
 @implements IDisposable
@@ -34,9 +35,9 @@
                      Class="psms-toolbar-menu"
                      AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
                 <MudMenuItem Icon="@Icons.Material.Filled.AddLink" OnClick="OpenNewConnection">New connection</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query <span class="psms-menu-hint">Ctrl+N</span></MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open… <span class="psms-menu-hint">Ctrl+O</span></MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save <span class="psms-menu-hint">Ctrl+S</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.NoteAdd" OnClick="NewQueryAsync">New query <span class="psms-menu-hint">⌘/Ctrl+N</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" OnClick="OpenSqlAsync">Open… <span class="psms-menu-hint">⌘/Ctrl+O</span></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Save" OnClick="SaveSqlAsync">Save <span class="psms-menu-hint">⌘/Ctrl+S</span></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.SaveAs" OnClick="SaveSqlAsAsync">Save As…</MudMenuItem>
                 <MudDivider Class="my-1" />
                 <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" OnClick="DuplicateTab">Duplicate tab</MudMenuItem>
@@ -415,6 +416,25 @@
         await ExecuteAsync();
     }
 
+    /// <summary>Cmd+Q (macOS) / Win+Q (Windows) — quit the app.</summary>
+    [JSInvokable]
+    public void OnShortcutQuit() => QuitApp();
+
+    private void QuitApp()
+    {
+        try
+        {
+            Photino.Window?.Close();
+        }
+        catch
+        {
+            // ignored
+        }
+
+        // Ensure process exits even if the native close event is delayed.
+        System.Environment.Exit(0);
+    }
+
     private void OnSessionsChanged()
     {
         _ = FlushAndSaveSessionAsync();
@@ -442,6 +462,16 @@
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
+        // Never hijack clipboard / select-all — especially important on macOS (Cmd+C/V/X/A).
+        if ((e.CtrlKey || e.MetaKey) && !e.AltKey && !e.ShiftKey
+            && (e.Key.Equals("c", StringComparison.OrdinalIgnoreCase)
+                || e.Key.Equals("v", StringComparison.OrdinalIgnoreCase)
+                || e.Key.Equals("x", StringComparison.OrdinalIgnoreCase)
+                || e.Key.Equals("a", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
         if ((e.CtrlKey || e.MetaKey) && e.ShiftKey && e.Key.Equals("p", StringComparison.OrdinalIgnoreCase))
         {
             await OpenPaletteAsync();
@@ -514,7 +544,7 @@
 
         // F5 / Ctrl+Enter are handled in capture-phase JS (psmsShortcuts) so the WebView
         // cannot reload the page; Blazor may still see bubbled keys when Monaco is not focused.
-        if (e.Key == "F5" || (e.CtrlKey && (e.Key == "Enter" || e.Code == "Enter")))
+        if (e.Key == "F5" || ((e.CtrlKey || e.MetaKey) && (e.Key == "Enter" || e.Code == "Enter")))
         {
             if (!Sessions.ShowAdminWorkspace && Sessions.ActiveTab is not null)
             {
@@ -523,19 +553,25 @@
         }
         else if (e.CtrlKey && e.Key.Equals(" ", StringComparison.Ordinal))
         {
+            // Ctrl+Space only — Cmd+Space is Spotlight on macOS.
             OpenSuggest();
         }
-        else if (e.CtrlKey && e.Key.Equals("n", StringComparison.OrdinalIgnoreCase))
+        else if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("n", StringComparison.OrdinalIgnoreCase))
         {
             await NewQueryAsync();
         }
-        else if (e.CtrlKey && e.Key.Equals("s", StringComparison.OrdinalIgnoreCase))
+        else if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("s", StringComparison.OrdinalIgnoreCase))
         {
             await SaveSqlAsync();
         }
-        else if (e.CtrlKey && e.Key.Equals("o", StringComparison.OrdinalIgnoreCase))
+        else if ((e.CtrlKey || e.MetaKey) && e.Key.Equals("o", StringComparison.OrdinalIgnoreCase))
         {
             await OpenSqlAsync();
+        }
+        else if (e.MetaKey && !e.CtrlKey && !e.AltKey && !e.ShiftKey
+                 && e.Key.Equals("q", StringComparison.OrdinalIgnoreCase))
+        {
+            QuitApp();
         }
         else if (e.Key == "Escape")
         {

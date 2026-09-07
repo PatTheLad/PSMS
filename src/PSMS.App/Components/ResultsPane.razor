@@ -945,7 +945,7 @@
     {
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", PlanTreeBuilder.FormatText(tree));
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", PlanTreeBuilder.FormatText(tree));
             Snackbar.Add("Plan tree copied.", Severity.Success);
         }
         catch
@@ -984,7 +984,7 @@
         var text = BuildTextView(set, GetGridRows(set));
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", text);
             Snackbar.Add("Copied text results.", Severity.Info);
         }
         catch
@@ -1025,7 +1025,7 @@
 
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", sb.ToString());
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", sb.ToString());
             Snackbar.Add($"Copied {take:N0} INSERT statement{(take == 1 ? "" : "s")}.", Severity.Success);
         }
         catch
@@ -1107,7 +1107,7 @@
 
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", text);
             Snackbar.Add("Copied.", Severity.Info);
         }
         catch
@@ -1260,7 +1260,7 @@
 
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", sb.ToString());
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", sb.ToString());
             Snackbar.Add($"Copied {take:N0} row(s) as Markdown.", Severity.Success);
         }
         catch

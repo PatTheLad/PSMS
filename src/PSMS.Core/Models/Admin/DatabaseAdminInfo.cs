@@ -52,3 +52,11 @@ public sealed class BackupSetInfo
     public string? PhysicalDeviceName { get; init; }
     public string? Description { get; init; }
 }
+
+/// <summary>Entry from SQL Server host filesystem (xp_dirtree / xp_fixeddrives).</summary>
+public sealed class ServerPathEntry
+{
+    public string Name { get; init; } = string.Empty;
+    public string FullPath { get; init; } = string.Empty;
+    public bool IsDirectory { get; init; }
+}

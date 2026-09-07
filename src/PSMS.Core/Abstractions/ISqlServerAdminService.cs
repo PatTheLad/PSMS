@@ -27,6 +27,16 @@ public interface ISqlServerAdminService
     Task<string> SuggestBackupPathAsync(
         ConnectionDefinition connection, string? password, string database, CancellationToken cancellationToken = default);
 
+    /// <summary>Default backup directory on the SQL Server host (SSMS starting folder).</summary>
+    Task<string?> GetDefaultBackupDirectoryAsync(
+        ConnectionDefinition connection, string? password, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// List drives (when <paramref name="path"/> is null/empty) or immediate children of a host path via xp_dirtree.
+    /// </summary>
+    Task<IReadOnlyList<ServerPathEntry>> ListServerDirectoryAsync(
+        ConnectionDefinition connection, string? password, string? path, CancellationToken cancellationToken = default);
+
     Task<AgentServiceStatus> GetAgentStatusAsync(
         ConnectionDefinition connection, string? password, CancellationToken cancellationToken = default);
 

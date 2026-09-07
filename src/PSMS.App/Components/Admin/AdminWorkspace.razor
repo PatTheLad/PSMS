@@ -213,7 +213,7 @@
             { x => x.Connection, _connection },
             { x => x.Database, database }
         };
-        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
         var result = await dialog.Result;
         if (result is { Canceled: false })
         {

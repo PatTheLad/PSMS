@@ -1798,3 +1798,61 @@ html.psms-col-resizing .psms-col-resizer {
         height: auto;
     }
 }
+
+.psms-path-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.psms-path-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.psms-server-path-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.psms-server-path-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.psms-server-path-list {
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid var(--psms-border);
+    border-radius: 6px;
+    background: var(--psms-panel-2);
+}
+
+.psms-server-path-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--psms-text);
+    text-align: left;
+    padding: 0.4rem 0.65rem;
+    cursor: pointer;
+    font: inherit;
+}
+
+.psms-server-path-item:hover {
+    background: var(--psms-accent-soft);
+}
+
+.psms-server-path-item.selected {
+    background: var(--psms-accent-soft);
+    box-shadow: inset 3px 0 0 var(--psms-accent);
+}
+
+.psms-server-path-item .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -11,6 +11,7 @@ public interface IFileDialogService
 {
     Task<string?> OpenSqlFileAsync();
     Task<string?> OpenDatabaseFileAsync(bool access);
+    Task<string?> OpenBackupFileAsync();
     Task<string?> SaveSqlFileAsync(string? defaultFileName = null);
     Task<string?> SaveCsvFileAsync(string? defaultFileName = null);
     Task<string?> SaveJsonFileAsync(string? defaultFileName = null);
@@ -67,6 +68,29 @@ public sealed class PhotinoFileDialogService : IFileDialogService
 
         var paths = await window.ShowOpenFileAsync(
             access ? "Open Access database" : "Open SQLite database",
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments),
+            multiSelect: false,
+            filters);
+
+        return paths is { Length: > 0 } ? paths[0] : null;
+    }
+
+    public async Task<string?> OpenBackupFileAsync()
+    {
+        var window = _host.Window;
+        if (window is null)
+        {
+            return null;
+        }
+
+        var filters = new (string, string[])[]
+        {
+            ("SQL Server backup", ["bak"]),
+            ("All files", ["*"])
+        };
+
+        var paths = await window.ShowOpenFileAsync(
+            "Select backup file",
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments),
             multiSelect: false,
             filters);

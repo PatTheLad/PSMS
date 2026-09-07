@@ -1,5 +1,6 @@
 @inject IConnectionStore Store
 @inject IDbProviderFactory ProviderFactory
+@inject ISqlServerAdminService Admin
 @inject ActiveSessionService Sessions
 @inject SchemaIntelliSenseService IntelliSense
 @inject ContextMenuService Menus
@@ -467,7 +468,7 @@
     {
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", name);
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", name);
             Snackbar.Add($"Copied {name}", Severity.Success);
         }
         catch
@@ -529,13 +530,71 @@
 
     private void OpenDatabaseMenu(MouseEventArgs e, ConnectionDefinition connection, string database)
     {
-        Menus.Open(e.ClientX, e.ClientY,
-        [
-            new ContextMenuItem { Text = "New Query", Action = () => NewQuery(connection, database) },
-            new ContextMenuItem { Text = "Backup…", Action = () => BackupDatabaseAsync(connection, database) },
-            new ContextMenuItem { Text = "Restore…", Action = () => RestoreDatabaseAsync(connection, database) },
-            new ContextMenuItem { Text = "Refresh", Action = () => LoadSchemasAsync(connection, database, force: true) }
-        ]);
+        var items = new List<ContextMenuItem>
+        {
+            new() { Text = "New Query", Action = () => NewQuery(connection, database) },
+            new() { Text = "Backup…", Action = () => BackupDatabaseAsync(connection, database) },
+            new() { Text = "Restore…", Action = () => RestoreDatabaseAsync(connection, database) }
+        };
+
+        if (connection.Engine == DbEngine.SqlServer && !IsSystemDatabase(database))
+        {
+            items.Add(new ContextMenuItem { IsDivider = true, Text = "-" });
+            items.Add(new ContextMenuItem
+            {
+                Text = "Take Offline",
+                Action = () => SetDatabaseOnlineAsync(connection, database, online: false)
+            });
+            items.Add(new ContextMenuItem
+            {
+                Text = "Bring Online",
+                Action = () => SetDatabaseOnlineAsync(connection, database, online: true)
+            });
+        }
+
+        items.Add(new ContextMenuItem { IsDivider = true, Text = "-" });
+        items.Add(new ContextMenuItem { Text = "Refresh", Action = () => LoadSchemasAsync(connection, database, force: true) });
+
+        Menus.Open(e.ClientX, e.ClientY, items);
+    }
+
+    private static bool IsSystemDatabase(string database) =>
+        database.Equals("master", StringComparison.OrdinalIgnoreCase)
+        || database.Equals("model", StringComparison.OrdinalIgnoreCase)
+        || database.Equals("msdb", StringComparison.OrdinalIgnoreCase)
+        || database.Equals("tempdb", StringComparison.OrdinalIgnoreCase);
+
+    private async Task SetDatabaseOnlineAsync(ConnectionDefinition connection, string database, bool online)
+    {
+        var action = online ? "online" : "offline";
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            online ? "Bring database online" : "Take database offline",
+            online
+                ? $"Bring [{database}] online?"
+                : $"Take [{database}] offline? Active connections will be rolled back.",
+            yesText: online ? "Bring Online" : "Take Offline",
+            cancelText: "Cancel");
+
+        if (confirm != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var password = connection.UseWindowsAuth ? null : Store.DecryptPassword(connection);
+            var result = await Admin.SetDatabaseOnlineAsync(connection, password, database, online);
+            Snackbar.Add(result.Message ?? (result.Succeeded ? $"Database set {action}." : $"Failed to set {action}."),
+                result.Succeeded ? Severity.Success : Severity.Error);
+            if (result.Succeeded)
+            {
+                await RefreshConnectionAsync(connection);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to set database {action}: {ex.Message}", Severity.Error);
+        }
     }
 
     private void OpenTableMenu(MouseEventArgs e, ConnectionDefinition connection, string database, string schema, string table)
@@ -884,7 +943,7 @@
             { x => x.Connection, connection },
             { x => x.Database, database }
         };
-        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var dialog = await DialogService.ShowAsync<RestoreDatabaseDialog>("Restore database", parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
         var result = await dialog.Result;
         if (result is { Canceled: false })
         {

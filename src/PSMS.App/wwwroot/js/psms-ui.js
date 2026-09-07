@@ -208,7 +208,42 @@
     return !!(el && (el.closest('.monaco-editor') || el.closest('.monaco-host')));
   };
 
-  // Capture-phase shortcuts so WebView does not steal F5 (reload) / Ctrl+Enter.
+  // Clipboard helper: navigator.clipboard often fails in WKWebView unless called carefully;
+  // fall back to a synchronous execCommand path used by copy buttons / results grid.
+  window.psmsClipboard = {
+    writeText(text) {
+      const value = text == null ? '' : String(text);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(value).catch(() => window.psmsClipboard._fallback(value));
+      }
+      return Promise.resolve(window.psmsClipboard._fallback(value));
+    },
+    _fallback(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      let ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      document.body.removeChild(ta);
+      if (!ok) {
+        throw new Error('Clipboard write failed');
+      }
+    }
+  };
+
+  // Capture-phase shortcuts so WebView does not steal F5 (reload) / Ctrl+Enter / Meta+Q.
+  // Never intercept Cmd/Ctrl+C/V/X/A — those must reach Monaco / inputs for clipboard & select-all.
   window.psmsShortcuts = {
     _ref: null,
     bind(dotnetRef) {
@@ -220,9 +255,23 @@
   };
 
   window.addEventListener('keydown', (e) => {
+    const key = (e.key || '').toLowerCase();
+    const code = e.code || '';
+
+    // Let standard editing shortcuts through untouched (macOS Cmd / Windows Ctrl).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey
+        && (key === 'c' || key === 'v' || key === 'x' || key === 'a'
+            || code === 'KeyC' || code === 'KeyV' || code === 'KeyX' || code === 'KeyA')) {
+      return;
+    }
+
     const isF5 = e.key === 'F5';
     const isCtrlEnter = (e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.code === 'Enter');
-    if (!isF5 && !isCtrlEnter) {
+    // Cmd+Q (macOS) / Win+Q (Windows) — metaKey is Command or Windows key in WebView
+    const isQuit = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+      && (key === 'q' || code === 'KeyQ');
+
+    if (!isF5 && !isCtrlEnter && !isQuit) {
       return;
     }
 
@@ -230,8 +279,15 @@
     e.stopPropagation();
 
     const ref = window.psmsShortcuts && window.psmsShortcuts._ref;
-    if (ref) {
-      ref.invokeMethodAsync('OnShortcutExecute');
+    if (!ref) {
+      return;
     }
+
+    if (isQuit) {
+      ref.invokeMethodAsync('OnShortcutQuit');
+      return;
+    }
+
+    ref.invokeMethodAsync('OnShortcutExecute');
   }, true);
 })();

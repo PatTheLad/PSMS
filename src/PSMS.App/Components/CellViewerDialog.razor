@@ -61,7 +61,7 @@
     {
         try
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", _display);
+            await Js.InvokeVoidAsync("psmsClipboard.writeText", _display);
             Snackbar.Add("Copied.", Severity.Info);
         }
         catch

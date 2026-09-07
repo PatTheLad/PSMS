@@ -1,16 +1,52 @@
 @inject ISqlServerAdminService Admin
 @inject IConnectionStore Store
+@inject IFileDialogService FileDialogs
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <MudDialog>
     <DialogContent>
         <MudStack Spacing="2">
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                Restore into <strong>@(_request.Database)</strong> from a .bak on the SQL Server host.
+                Restore into <strong>@(_request.Database)</strong>. The .bak path must be readable by the
+                <em>SQL Server service</em> (server disk or a UNC share), same as SSMS.
             </MudText>
             <MudTextField @bind-Value="_request.Database" Label="Target database" Required="true" />
-            <MudTextField @bind-Value="_request.BackupPath" Label="Backup path (.bak)" Required="true"
-                          HelperText="Path must be readable by the SQL Server service" />
+
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Backup file</MudText>
+            <div class="psms-path-row">
+                <MudTextField @bind-Value="_request.BackupPath" Label="Backup path (.bak)" Required="true"
+                              Class="psms-path-field"
+                              HelperText="@_pathHint" />
+            </div>
+            <MudStack Row="true" Spacing="1" Class="flex-wrap">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Dns"
+                           Disabled="_busy" OnClick="BrowseServerAsync">Browse server…</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen"
+                           Disabled="_busy" OnClick="BrowseLocalAsync">Browse local…</MudButton>
+            </MudStack>
+
+            @if (_recent.Count > 0)
+            {
+                <MudSelect T="string" Label="Recent backups on this server" Dense="true" Margin="Margin.Dense"
+                           Value="_pickedRecent" ValueChanged="OnRecentChanged" Disabled="_busy"
+                           HelperText="From msdb backup history">
+                    <MudSelectItem T="string" Value="@string.Empty">(pick a recent backup)</MudSelectItem>
+                    @foreach (var b in _recent)
+                    {
+                        var path = b.PhysicalDeviceName ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(path))
+                        {
+                            continue;
+                        }
+
+                        <MudSelectItem T="string" Value="@path">
+                            @($"{b.BackupStartDate.LocalDateTime:g} · {b.Name} · {path}")
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            }
+
             <MudCheckBox @bind-Value="_request.Replace" Label="REPLACE existing database (kicks users)" Color="Color.Warning" />
             <MudCheckBox @bind-Value="_request.Recover" Label="RECOVERY (bring online)" Color="Color.Primary" />
             @if (_messages.Count > 0)
@@ -45,9 +81,13 @@
 
     private readonly RestoreDatabaseRequest _request = new() { Replace = true };
     private readonly List<string> _messages = [];
+    private readonly List<BackupSetInfo> _recent = [];
+    private string _pickedRecent = string.Empty;
+    private string _pathHint = "Use Browse server for files on the SQL host, or Browse local if SQL can read that path (local instance / UNC).";
     private bool _busy;
+    private string? _defaultBackupDir;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         if (!string.IsNullOrWhiteSpace(Database))
         {
@@ -58,6 +98,97 @@
         {
             _request.BackupPath = BackupPath;
         }
+
+        try
+        {
+            var password = Connection.UseWindowsAuth ? null : Store.DecryptPassword(Connection);
+            _defaultBackupDir = await Admin.GetDefaultBackupDirectoryAsync(Connection, password);
+            if (string.IsNullOrWhiteSpace(_request.BackupPath) && !string.IsNullOrWhiteSpace(_defaultBackupDir))
+            {
+                var sep = _defaultBackupDir.Contains('/') && !_defaultBackupDir.Contains('\\') ? "/" : "\\";
+                _request.BackupPath = _defaultBackupDir.TrimEnd('\\', '/') + sep;
+            }
+
+            var recent = await Admin.GetRecentBackupsAsync(Connection, password, string.IsNullOrWhiteSpace(_request.Database) ? null : _request.Database);
+            _recent.AddRange(recent.Where(b => !string.IsNullOrWhiteSpace(b.PhysicalDeviceName)));
+        }
+        catch
+        {
+            // optional
+        }
+    }
+
+    private Task OnRecentChanged(string path)
+    {
+        _pickedRecent = path;
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _request.BackupPath = path;
+            _pathHint = "Selected from recent server backups (msdb).";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task BrowseServerAsync()
+    {
+        var parameters = new DialogParameters<ServerPathBrowserDialog>
+        {
+            { x => x.Connection, Connection },
+            { x => x.InitialPath, string.IsNullOrWhiteSpace(_request.BackupPath) ? _defaultBackupDir : ParentDir(_request.BackupPath) },
+            { x => x.FilesOnlyBak, true }
+        };
+
+        var dialog = await DialogService.ShowAsync<ServerPathBrowserDialog>(
+            "Browse SQL Server",
+            parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string path } && !string.IsNullOrWhiteSpace(path))
+        {
+            _request.BackupPath = path;
+            _pickedRecent = string.Empty;
+            _pathHint = "Path on the SQL Server host.";
+        }
+    }
+
+    private async Task BrowseLocalAsync()
+    {
+        var path = await FileDialogs.OpenBackupFileAsync();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        _request.BackupPath = path;
+        _pickedRecent = string.Empty;
+        _pathHint = "Local path — SQL Server must be able to read it (same machine or UNC share).";
+        Snackbar.Add("Local file selected. Restore only works if the SQL Server service can read this path.", Severity.Info);
+    }
+
+    private static string? ParentDir(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var trimmed = path.TrimEnd('\\', '/');
+        var slash = trimmed.Contains('/') && !trimmed.Contains('\\') ? '/' : '\\';
+        var idx = trimmed.LastIndexOf(slash);
+        if (idx <= 0)
+        {
+            return null;
+        }
+
+        var parent = trimmed[..idx];
+        if (parent.Length == 2 && parent[1] == ':')
+        {
+            return parent + "\\";
+        }
+
+        return parent;
     }
 
     private void Cancel() => MudDialog.Cancel();

@@ -432,6 +432,179 @@ public sealed partial class SqlServerAdminService : ISqlServerAdminService
         return $"/var/opt/mssql/data/{fileName}";
     }
 
+    public async Task<string?> GetDefaultBackupDirectoryAsync(
+        ConnectionDefinition connection,
+        string? password,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+        await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        // SQL Server 2019+ 
+        try
+        {
+            await using var cmd = new SqlCommand("SELECT CONVERT(nvarchar(4000), SERVERPROPERTY('InstanceDefaultBackupPath'));", conn);
+            var path = (await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) as string;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                return path.TrimEnd('\\', '/');
+            }
+        }
+        catch
+        {
+            // older builds
+        }
+
+        // Recent backup media folder
+        try
+        {
+            await using var cmd = new SqlCommand("""
+                SELECT TOP (1) physical_device_name
+                FROM msdb.dbo.backupmediafamily
+                WHERE physical_device_name LIKE '%.bak'
+                ORDER BY media_set_id DESC;
+                """, conn);
+            var sample = (await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) as string;
+            if (!string.IsNullOrWhiteSpace(sample))
+            {
+                var slash = sample.Contains('\\') ? '\\' : '/';
+                var idx = sample.LastIndexOf(slash);
+                if (idx > 0)
+                {
+                    return sample[..idx];
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var platform = await DetectHostPlatformAsync(conn, cancellationToken).ConfigureAwait(false);
+        return platform == "Linux" ? "/var/opt/mssql/data" : null;
+    }
+
+    public async Task<IReadOnlyList<ServerPathEntry>> ListServerDirectoryAsync(
+        ConnectionDefinition connection,
+        string? password,
+        string? path,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = SqlServerConnectionFactory.Create(connection, password, "master");
+        await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return await ListServerRootsAsync(conn, cancellationToken).ConfigureAwait(false);
+        }
+
+        var list = new List<ServerPathEntry>();
+        var sep = path.Contains('/') && !path.Contains('\\') ? "/" : "\\";
+        var basePath = path.TrimEnd('\\', '/');
+
+        // xp_dirtree: subdirectory, depth, file (0=dir, 1=file) when @file_or_directory = 1
+        const string sql = """
+            DECLARE @dir TABLE (subdirectory nvarchar(512) NOT NULL, depth int NOT NULL, [file] int NOT NULL);
+            INSERT INTO @dir (subdirectory, depth, [file])
+            EXEC master.sys.xp_dirtree @path, 1, 1;
+            SELECT subdirectory, [file] FROM @dir ORDER BY [file], subdirectory;
+            """;
+
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@path", basePath);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var name = reader.GetString(0);
+                var isFile = reader.GetInt32(1) == 1;
+                var full = basePath.EndsWith(':')
+                    ? basePath + sep + name
+                    : basePath + sep + name;
+                list.Add(new ServerPathEntry
+                {
+                    Name = name,
+                    FullPath = full,
+                    IsDirectory = !isFile
+                });
+            }
+        }
+
+        return list;
+    }
+
+    private static async Task<IReadOnlyList<ServerPathEntry>> ListServerRootsAsync(
+        SqlConnection conn,
+        CancellationToken cancellationToken)
+    {
+        var list = new List<ServerPathEntry>();
+        var platform = await DetectHostPlatformAsync(conn, cancellationToken).ConfigureAwait(false);
+
+        if (platform == "Linux")
+        {
+            foreach (var root in new[] { "/", "/var/opt/mssql", "/var/opt/mssql/data", "/var/opt/mssql/backup" })
+            {
+                list.Add(new ServerPathEntry { Name = root, FullPath = root, IsDirectory = true });
+            }
+
+            return list;
+        }
+
+        // Windows: fixed drives
+        try
+        {
+            await using var cmd = new SqlCommand("EXEC master.dbo.xp_fixeddrives;", conn);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var drive = reader.GetValue(0)?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(drive))
+                {
+                    continue;
+                }
+
+                var letter = drive.Length == 1 ? drive + ":" : drive.TrimEnd('\\');
+                if (!letter.EndsWith(':'))
+                {
+                    letter += ":";
+                }
+
+                list.Add(new ServerPathEntry
+                {
+                    Name = letter + "\\",
+                    FullPath = letter + "\\",
+                    IsDirectory = true
+                });
+            }
+        }
+        catch
+        {
+            // xp_fixeddrives may be disabled
+        }
+
+        if (list.Count == 0)
+        {
+            list.Add(new ServerPathEntry { Name = "C:\\", FullPath = "C:\\", IsDirectory = true });
+        }
+
+        return list;
+    }
+
+    private static async Task<string> DetectHostPlatformAsync(SqlConnection conn, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand(
+                "SELECT TOP (1) host_platform FROM sys.dm_os_host_info;", conn);
+            var platform = (await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) as string;
+            return string.IsNullOrWhiteSpace(platform) ? "Windows" : platform;
+        }
+        catch
+        {
+            return "Windows";
+        }
+    }
+
     public async Task<AgentServiceStatus> GetAgentStatusAsync(
         ConnectionDefinition connection,
         string? password,
