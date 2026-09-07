@@ -36,11 +36,15 @@ jobs:
       - name: Stage stable release filenames
         shell: pwsh
         run: |
+          $ver = "${{ steps.ver.outputs.version }}"
           $exe = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.exe | Select-Object -First 1
           $msi = Get-ChildItem artifacts/PSMS-Setup-*-win-x64.msi | Select-Object -First 1
           if (-not $exe) { throw 'Setup EXE not found' }
           Copy-Item $exe.FullName artifacts/PSMS-Setup-win-x64.exe -Force
           if ($msi) { Copy-Item $msi.FullName artifacts/PSMS-Setup-win-x64.msi -Force }
+          $setupUrl = "https://github.com/PatTheLad/PSMS/releases/download/latest/PSMS-Setup-win-x64.exe"
+          @{ version = $ver; setupUrl = $setupUrl } | ConvertTo-Json -Compress |
+            Set-Content -Path artifacts/version.json -Encoding utf8NoBOM
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -49,6 +53,7 @@ jobs:
           path: |
             artifacts/PSMS-Setup-*-win-x64.exe
             artifacts/PSMS-Setup-*-win-x64.msi
+            artifacts/version.json
           if-no-files-found: error
 
       - name: Publish to GitHub Release (latest)
@@ -76,5 +81,5 @@ jobs:
             The standalone `.msi` requires ASP.NET Core 10 already installed.
 
             Target PCs also need [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (usually present with Edge).
-          artifacts: artifacts/PSMS-Setup-win-x64.exe,artifacts/PSMS-Setup-win-x64.msi
+          artifacts: artifacts/PSMS-Setup-win-x64.exe,artifacts/PSMS-Setup-win-x64.msi,artifacts/version.json
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -328,6 +328,7 @@
     private readonly HashSet<string> _loadingNodes = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> _connecting = [];
     private bool _loading;
+    private int _reloadEpoch;
     private string _filter = string.Empty;
     private List<CatalogHit> _catalogHits = [];
 
@@ -461,13 +462,20 @@
 
     public async Task ReloadAsync()
     {
+        var epoch = Interlocked.Increment(ref _reloadEpoch);
         _loading = true;
         StateHasChanged();
         try
         {
             var previous = _databases.ToDictionary(kv => kv.Key, kv => kv.Value);
+            var loaded = await Store.GetAllAsync();
+            if (epoch != Volatile.Read(ref _reloadEpoch))
+            {
+                return; // superseded by a newer reload
+            }
+
             _connections.Clear();
-            _connections.AddRange(await Store.GetAllAsync());
+            _connections.AddRange(loaded);
             var ids = _connections.Select(c => c.Id).ToHashSet();
             _databases.Clear();
             foreach (var pair in previous.Where(p => ids.Contains(p.Key)))
@@ -477,8 +485,11 @@
         }
         finally
         {
-            _loading = false;
-            StateHasChanged();
+            if (epoch == Volatile.Read(ref _reloadEpoch))
+            {
+                _loading = false;
+                StateHasChanged();
+            }
         }
     }
 

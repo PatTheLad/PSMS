@@ -46,6 +46,7 @@ internal static class Program
         appBuilder.Services.AddSingleton<IntelliSenseJsBridge>();
         appBuilder.Services.AddSingleton<PhotinoHost>();
         appBuilder.Services.AddSingleton<IFileDialogService, PhotinoFileDialogService>();
+        appBuilder.Services.AddSingleton<AppUpdateService>();
 
         appBuilder.RootComponents.Add<App>("app");
 

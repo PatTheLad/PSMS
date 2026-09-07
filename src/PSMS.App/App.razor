@@ -11,6 +11,7 @@
 @inject ISnackbar Snackbar
 @inject UiLayoutStore LayoutStore
 @inject SessionStore SessionStore
+@inject AppUpdateService Updates
 @using PSMS.Core.Storage
 @using PSMS.Core.Sql
 @implements IDisposable
@@ -58,6 +59,19 @@
                        OnClick="ToggleAdmin">Admin</MudButton>
 
             <MudSpacer />
+            @if (Updates.Available is { } update)
+            {
+                <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.SystemUpdateAlt"
+                           Disabled="@Updates.IsInstalling"
+                           OnClick="InstallUpdateAsync"
+                           Class="mr-2"
+                           title="@($"Update to {update.Version}")">
+                    @(Updates.IsInstalling
+                        ? $"Updating… {Updates.InstallProgress:0}%"
+                        : $"Update {update.Version}")
+                </MudButton>
+            }
             <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@EngineLabel</MudChip>
             <MudTooltip Text="Refresh object catalog used by Insert object">
                 <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Class="ml-1"
@@ -213,7 +227,46 @@
     protected override void OnInitialized()
     {
         Sessions.Changed += OnSessionsChanged;
+        Updates.Changed += OnUpdatesChanged;
         _ = LoadLayoutAndSessionAsync();
+        _ = CheckForUpdatesAsync();
+    }
+
+    private void OnUpdatesChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            // Delay so startup / session restore is not competing for the network.
+            await Task.Delay(2500);
+            await Updates.CheckForUpdatesAsync();
+            if (Updates.Available is { } update)
+            {
+                Snackbar.Add($"PSMS {update.Version} is available.", Severity.Info);
+            }
+        }
+        catch
+        {
+            // optional feature — ignore
+        }
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        try
+        {
+            Snackbar.Add("Downloading update… the app will close when the installer starts.", Severity.Info);
+            await Updates.DownloadAndInstallAsync();
+            if (!string.IsNullOrWhiteSpace(Updates.LastError))
+            {
+                Snackbar.Add($"Update failed: {Updates.LastError}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Update failed: {ex.Message}", Severity.Error);
+        }
     }
 
     private async Task LoadLayoutAndSessionAsync()
@@ -297,8 +350,29 @@
             _dotNetRef = DotNetObjectReference.Create(this);
             // Bind JS to this component's sync context — never call JS from background threads.
             IntelliSenseJs.Bind(Js, InvokeAsync);
+            try
+            {
+                await Js.InvokeVoidAsync("psmsShortcuts.bind", _dotNetRef);
+            }
+            catch
+            {
+                // script may not be ready yet
+            }
+
             await ApplyLayoutToDomAsync();
         }
+    }
+
+    /// <summary>Invoked from capture-phase JS so F5/Ctrl+Enter run the query instead of reloading the WebView.</summary>
+    [JSInvokable]
+    public async Task OnShortcutExecute()
+    {
+        if (Sessions.ShowAdminWorkspace || Sessions.ActiveTab is null)
+        {
+            return;
+        }
+
+        await ExecuteAsync();
     }
 
     private void OnSessionsChanged()
@@ -398,9 +472,14 @@
             return;
         }
 
+        // F5 / Ctrl+Enter are handled in capture-phase JS (psmsShortcuts) so the WebView
+        // cannot reload the page; Blazor may still see bubbled keys when Monaco is not focused.
         if (e.Key == "F5" || (e.CtrlKey && (e.Key == "Enter" || e.Code == "Enter")))
         {
-            await ExecuteAsync();
+            if (!Sessions.ShowAdminWorkspace && Sessions.ActiveTab is not null)
+            {
+                await ExecuteAsync();
+            }
         }
         else if (e.CtrlKey && e.Key.Equals(" ", StringComparison.Ordinal))
         {
@@ -537,12 +616,8 @@
         {
             { x => x.Connection, new ConnectionDefinition() }
         };
-        var dialog = await DialogService.ShowAsync<ConnectionDialog>("New connection", parameters);
-        var result = await dialog.Result;
-        if (result is { Canceled: false } && _explorer is not null)
-        {
-            await _explorer.ReloadAsync();
-        }
+        // Reload comes from ConnectionDialog → NotifyConnectionsChanged (avoid double ReloadAsync race).
+        await DialogService.ShowAsync<ConnectionDialog>("New connection", parameters);
     }
 
     private async Task EditConnection(ConnectionDefinition connection)
@@ -551,12 +626,7 @@
         {
             { x => x.Connection, Clone(connection) }
         };
-        var dialog = await DialogService.ShowAsync<ConnectionDialog>("Edit connection", parameters);
-        var result = await dialog.Result;
-        if (result is { Canceled: false } && _explorer is not null)
-        {
-            await _explorer.ReloadAsync();
-        }
+        await DialogService.ShowAsync<ConnectionDialog>("Edit connection", parameters);
     }
 
     private void HandleOpenQuery((ConnectionDefinition Connection, string Database, string? Sql, string? Title) args)
@@ -847,6 +917,16 @@
     public void Dispose()
     {
         Sessions.Changed -= OnSessionsChanged;
+        Updates.Changed -= OnUpdatesChanged;
+        try
+        {
+            _ = Js.InvokeVoidAsync("psmsShortcuts.unbind");
+        }
+        catch
+        {
+            // shutting down
+        }
+
         _dotNetRef?.Dispose();
     }
 

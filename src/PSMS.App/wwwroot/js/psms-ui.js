@@ -207,4 +207,31 @@
     const el = document.activeElement;
     return !!(el && (el.closest('.monaco-editor') || el.closest('.monaco-host')));
   };
+
+  // Capture-phase shortcuts so WebView does not steal F5 (reload) / Ctrl+Enter.
+  window.psmsShortcuts = {
+    _ref: null,
+    bind(dotnetRef) {
+      this._ref = dotnetRef;
+    },
+    unbind() {
+      this._ref = null;
+    }
+  };
+
+  window.addEventListener('keydown', (e) => {
+    const isF5 = e.key === 'F5';
+    const isCtrlEnter = (e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.code === 'Enter');
+    if (!isF5 && !isCtrlEnter) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const ref = window.psmsShortcuts && window.psmsShortcuts._ref;
+    if (ref) {
+      ref.invokeMethodAsync('OnShortcutExecute');
+    }
+  }, true);
 })();

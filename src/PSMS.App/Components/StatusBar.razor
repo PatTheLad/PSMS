@@ -1,5 +1,6 @@
 @inject ActiveSessionService Sessions
 @inject SchemaIntelliSenseService IntelliSense
+@inject AppUpdateService Updates
 @implements IDisposable
 
 <div class="psms-status" style="@StatusAccentStyle">
@@ -53,6 +54,8 @@
         <span>Rows: <strong>@result.ResultSets.Sum(r => r.Rows.Count).ToString("N0")</strong></span>
         <span>@result.ElapsedMilliseconds ms</span>
     }
+
+    <span class="psms-status-version" title="Installed version">v@(Updates.CurrentVersion)</span>
 </div>
 
 @code {
@@ -86,6 +89,7 @@
     {
         Sessions.Changed += OnChanged;
         IntelliSense.Changed += OnChanged;
+        Updates.Changed += OnChanged;
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
@@ -94,5 +98,6 @@
     {
         Sessions.Changed -= OnChanged;
         IntelliSense.Changed -= OnChanged;
+        Updates.Changed -= OnChanged;
     }
 }

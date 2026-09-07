@@ -1004,6 +1004,11 @@ html.psms-col-resizing .psms-col-resizer {
     color: #fbbf24;
 }
 
+.psms-status-version {
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+}
+
 .psms-filter {
     flex: 0 0 auto;
     display: flex;
